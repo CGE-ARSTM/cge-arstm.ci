@@ -6,6 +6,20 @@
 <title>CGE ARSTM — Conférence des Grandes Écoles</title>
 <meta name="description" content="Section ARSTM de la Conférence des Grandes Écoles de Côte d'Ivoire : actualités, événements, opportunités, réseau des anciens, mentorat, médiathèque et espace membre." />
 <meta name="theme-color" content="#ff8a00" />
+<!-- Aperçu du lien quand on le partage (WhatsApp, Facebook…) -->
+<link rel="canonical" href="https://cge-arstm.com/" />
+<meta property="og:type" content="website" />
+<meta property="og:site_name" content="CGE ARSTM" />
+<meta property="og:locale" content="fr_FR" />
+<meta property="og:url" content="https://cge-arstm.com/" />
+<meta property="og:title" content="CGE ARSTM — Conférence des Grandes Écoles" />
+<meta property="og:description" content="Section ARSTM de la Conférence des Grandes Écoles de Côte d'Ivoire : actualités, événements, opportunités, réseau des anciens et adhésion." />
+<meta property="og:image" content="https://cge-arstm.com/logos/apercu.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta property="og:image:alt" content="CGE ARSTM, Conférence des Grandes Écoles, section ARSTM" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:image" content="https://cge-arstm.com/logos/apercu.png" />
 <link rel="icon" type="image/svg+xml" href="logos/cge-arstm.svg" />
 
 <!-- Police -->
@@ -523,6 +537,14 @@ const SEEN_KEY = "cge-arstm:vu";
 const readSeen = () => { try { return JSON.parse(window.localStorage.getItem(SEEN_KEY)) || {}; } catch (e) { return {}; } };
 const writeSeen = (s) => { try { window.localStorage.setItem(SEEN_KEY, JSON.stringify(s)); } catch (e) { /* navigateur sans stockage : tant pis */ } };
 const TRACKED = ["actualites", "evenements", "opportunites", "mediatheque"];
+// Pages du site : chacune a son adresse (cge-arstm.com/#evenements…), pour partager un lien et pour le bouton Retour.
+const PAGES_SITE = ["accueil", "apropos", "bureau", "actualites", "evenements", "opportunites", "alumni", "mediatheque", "partenaires", "adhesion", "contact", "profil", "admin"];
+// Page indiquée dans l'adresse ; toute autre valeur (par exemple celle ajoutée par Supabase après un email) mène à l'accueil.
+const pageFromHash = () => {
+  let h = "";
+  try { h = decodeURIComponent((window.location.hash || "").slice(1)); } catch (e) { /* adresse illisible : accueil */ }
+  return PAGES_SITE.includes(h) ? h : "accueil";
+};
 
 function completion(p) {
   const checks = [p.photo, p.prenoms && p.nom, p.telephone, p.email, p.filiere, p.promotion, p.ville, p.bio, p.titre, p.objectif,
@@ -795,7 +817,7 @@ function Lightbox({ photos, index, onClose, onIndex }) {
 // APPLICATION
 // =====================================================================
 function App() {
-  const [page, setPage] = useState("accueil");
+  const [page, setPage] = useState(pageFromHash);
   const [menuOpen, setMenuOpen] = useState(false);
   const [loginOpen, setLoginOpen] = useState(false);
   const [recovery, setRecovery] = useState(false);
@@ -941,7 +963,7 @@ function App() {
   // ----- Navigation et pastilles « Nouveau » -----
   const seenOf = (s) => seen[s] || defaultSeen;
   const sinceFor = (s) => baseline[s] || seenOf(s);
-  const go = (p) => {
+  const go = (p, depuisHistorique) => {
     if (TRACKED.includes(p)) {
       setBaseline((b) => ({ ...b, [p]: seenOf(p) }));
       const next = { ...seen, [p]: new Date().toISOString() };
@@ -949,9 +971,22 @@ function App() {
       writeSeen(next);
     }
     setPage(p); setMenuOpen(false); window.scrollTo({ top: 0, behavior: "smooth" });
+    // Adresse de la page dans la barre du navigateur (#evenements…) : liens partageables et bouton Retour.
+    if (!depuisHistorique && pageFromHash() !== p) {
+      try { window.history.pushState(null, "", p === "accueil" ? window.location.pathname + window.location.search : "#" + p); } catch (e) { /* navigateur ancien : tant pis */ }
+    }
   };
   const goContact = (subject) => { setContactSubject(subject || CONTACT_SUBJECTS[0]); go("contact"); };
   const openLogin = () => { setLoginOpen(true); setMenuOpen(false); };
+
+  // Bouton Retour / Suivant du navigateur (et geste « retour » sur iPhone) : on affiche la page de l'adresse.
+  const goRef = useRef(go);
+  goRef.current = go;
+  useEffect(() => {
+    const onPop = () => goRef.current(pageFromHash(), true);
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
 
   const user = me ? { id: me.id, name: accountName(me), role: me.role, email: me.email, type: profile.type } : null;
   const isAdmin = user?.role === "admin";
@@ -1593,6 +1628,17 @@ function App() {
           : <main className="max-w-6xl mx-auto px-4 py-20"><Locked onLogin={openLogin} label="à votre espace personnel" /></main>)}
 
         {/* ===== ADMINISTRATION ===== */}
+        {page === "admin" && !canManage && (
+          <main className="max-w-6xl mx-auto px-4 py-20">
+            {user ? (
+              <div className="max-w-md mx-auto text-center bg-white rounded-3xl shadow-xl p-10">
+                <div className="w-16 h-16 mx-auto rounded-2xl bg-orange-100 flex items-center justify-center"><Shield className="text-orange-600" /></div>
+                <p className="font-bold text-slate-900 text-lg mt-5">Cette page est réservée au bureau.</p>
+                <button onClick={() => go("accueil")} className="mt-6 px-6 py-3 rounded-xl bg-orange-600 text-white font-semibold hover:bg-orange-700">Retour à l'accueil</button>
+              </div>
+            ) : <Locked onLogin={openLogin} label="à l'administration" />}
+          </main>
+        )}
         {page === "admin" && canManage && (
           <>
             <PageHero kicker={isAdmin ? "Réservé aux administrateurs" : "Droits confiés par le bureau"} title={isAdmin ? "Administration" : "Gestion du site"} icon={Shield} />
