@@ -1559,7 +1559,7 @@ function App() {
                       <div key={bloc.titre || "membres"} className={"col-span-full" + (b > 0 ? " mt-4" : "")}>
                         {/* Trombinoscope du bureau (v100) · compartiments (v101) */}
                         {bloc.titre && (
-                          <p className="flex items-center gap-3 mb-4 text-sm font-bold text-orange-700"><span className="w-8 h-0.5 rounded-full bg-orange-400 flex-shrink-0" />Compartiment {bloc.titre}</p>
+                          <p className="mb-4 text-sm sm:text-base font-bold text-orange-700">{bloc.titre}</p>
                         )}
                         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-5">
                           {bloc.membres.map(([name, role], i) => (
