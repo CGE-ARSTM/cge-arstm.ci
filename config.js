@@ -51,6 +51,6 @@ window.CGE_CONFIG = {
 
   // Images par défaut (elles peuvent aussi être changées depuis Administration → Images & logos)
   LOGO_SRC: "logos/cge-arstm.svg",
-  LOGOS_ECOLES: { ARSTM: null, ENSEA: null, ESATIC: null, "INP-HB": null, ESA: null, ESCAE: null, ESI: null, ESMG: null, ESTP: null },
+  LOGOS_ECOLES: { ARSTM: null, ESATIC: null, "INP-HB": null, ESA: null, ESCAE: null, ESI: null, ESMG: null, ESTP: null },
   PHOTOS_BUREAU: {},
 };
