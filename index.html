@@ -453,7 +453,7 @@ const authMessage = (error) => {
 
 // =====================================================================
 // IMAGES MODIFIABLES PAR L'ADMINISTRATEUR
-// Clés : "logo", "ecole:ENSEA", "membre:<nom>" (les logos des partenaires sont dans Administration → Partenaires)
+// Clés : "logo", "ecole:ARSTM", "membre:<nom>" (les logos des partenaires sont dans Administration → Partenaires)
 // =====================================================================
 const DEFAULT_IMAGES = {
   logo: LOGO_SRC,
@@ -1501,12 +1501,12 @@ function App() {
                   <h2 className="text-3xl font-extrabold text-slate-900 mt-2">{tx("apropos.ecoles_titre")}</h2>
                   <p className="text-slate-500 mt-3 whitespace-pre-line">{tx("apropos.ecoles_texte")}</p>
                 </div>
-                <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-5 mt-10">
-                  {ecolesList().map(([s, d, sub], i) => {
+                <div className="flex flex-wrap justify-center gap-5 mt-10">{/* Écoles membres : cartes centrées, largeur selon leur nombre (v104) */}
+                  {ecolesList().map(([s, d, sub], i, toutes) => {
                     // La première école est mise en avant en orange ; celles qui ont des écoles rattachées sont sur fond bleu marine.
                     const first = i === 0, navy = !first && sub.length > 0, dark = first || navy;
                     return (
-                      <div key={s} className={`rounded-3xl p-6 shadow-sm hover:shadow-xl hover:-translate-y-1 transition ${first ? "bg-gradient-to-br from-orange-500 to-orange-700 text-white" : navy ? "text-white" : "bg-white text-slate-800"}`} style={navy ? { background: NAVY } : undefined}>
+                      <div key={s} className={`w-full md:w-[calc((100%-1.25rem)/2)] ${toutes.length === 4 ? "lg:w-[calc((100%-3.75rem)/4)]" : "lg:w-[calc((100%-2.5rem)/3)]"} rounded-3xl p-6 shadow-sm hover:shadow-xl hover:-translate-y-1 transition ${first ? "bg-gradient-to-br from-orange-500 to-orange-700 text-white" : navy ? "text-white" : "bg-white text-slate-800"}`} style={navy ? { background: NAVY } : undefined}>
                         <SchoolLogo code={s} dark={dark} />
                         <p className="text-2xl font-extrabold mt-4">{s}</p>
                         <p className={`text-sm mt-2 leading-snug ${first ? "text-orange-100" : navy ? "text-slate-300" : "text-slate-500"}`}>{d}</p>
