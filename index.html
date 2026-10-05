@@ -482,6 +482,65 @@ const compressImage = (file, max = 700, quality = 0.85) => new Promise((resolve,
   img.src = url;
 });
 
+// =====================================================================
+// PHOTOS DE PERSONNES : recadrage automatique sur le visage (v99)
+// Le détecteur de visages (MediaPipe, Google) n'est téléchargé qu'au premier dépôt de photo.
+// Si aucun visage n'est trouvé (ou en cas de problème), la photo est traitée comme avant.
+// =====================================================================
+const VISION_URL = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
+const MODELE_VISAGE = "https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite";
+let detecteurVisage = null;
+const chargerDetecteur = () => {
+  if (!detecteurVisage) {
+    detecteurVisage = (async () => {
+      const { FaceDetector, FilesetResolver } = await import(VISION_URL + "/vision_bundle.mjs");
+      const fichiers = await FilesetResolver.forVisionTasks(VISION_URL + "/wasm");
+      return FaceDetector.createFromOptions(fichiers, { baseOptions: { modelAssetPath: MODELE_VISAGE }, runningMode: "IMAGE", minDetectionConfidence: 0.5 });
+    })().catch((e) => { detecteurVisage = null; throw e; });
+  }
+  return detecteurVisage;
+};
+const avecDelai = (promesse, ms) => Promise.race([promesse, new Promise((_, ko) => setTimeout(() => ko(new Error("délai dépassé")), ms))]);
+const ouvrirImage = (file) => new Promise((ok, ko) => {
+  const url = URL.createObjectURL(file);
+  const img = new window.Image();
+  img.onload = () => ok({ img, url });
+  img.onerror = () => { URL.revokeObjectURL(url); ko(new Error("Image illisible. Essayez une image JPG ou PNG.")); };
+  img.src = url;
+});
+// Renvoie une photo carrée centrée sur le visage (le plus grand si plusieurs), ou null si aucun visage n'est trouvé.
+const recadrerVisage = async (file, max = 500) => {
+  const { img, url } = await ouvrirImage(file);
+  try {
+    const W = img.naturalWidth, H = img.naturalHeight;
+    const k = Math.min(1, 1024 / Math.max(W, H));
+    const c = document.createElement("canvas");
+    c.width = Math.max(1, Math.round(W * k)); c.height = Math.max(1, Math.round(H * k));
+    c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+    const detecteur = await avecDelai(chargerDetecteur(), 20000);
+    const visages = ((detecteur.detect(c) || {}).detections || []).map((d) => d.boundingBox).filter(Boolean);
+    if (!visages.length) return null;
+    const b = visages.sort((a, z) => z.width * z.height - a.width * a.height)[0];
+    const fx = (b.originX + b.width / 2) / k, fy = (b.originY + b.height / 2) / k, fw = b.width / k;
+    // Le visage occupe environ 40 % du carré, un peu au-dessus du centre (place pour les cheveux et les épaules).
+    const S = Math.min(W, H, Math.max(fw * 2.4, 64));
+    const x0 = Math.min(Math.max(fx - S / 2, 0), W - S);
+    const y0 = Math.min(Math.max(fy + S * 0.05 - S / 2, 0), H - S);
+    const N = Math.max(1, Math.round(Math.min(max, S)));
+    const out = document.createElement("canvas"); out.width = N; out.height = N;
+    const g = out.getContext("2d"); g.fillStyle = "#fff"; g.fillRect(0, 0, N, N);
+    g.drawImage(img, x0, y0, S, S, 0, 0, N, N);
+    return await new Promise((ok) => out.toBlob((bl) => ok(bl), "image/jpeg", 0.88));
+  } finally { URL.revokeObjectURL(url); }
+};
+// Photo d'une personne : recadrée sur le visage si possible, sinon réduite comme avant.
+const photoPersonne = async (file, max = 500) => {
+  if (!file || !file.type || !file.type.startsWith("image/")) throw new Error("Ce fichier n'est pas une image.");
+  if (file.size > 15 * 1048576) throw new Error("Image trop lourde (15 Mo maximum).");
+  try { const b = await recadrerVisage(file, max); if (b) return b; } catch (e) { console.warn("Recadrage sur le visage impossible :", e); }
+  return compressImage(file, max);
+};
+
 const slugify = (s) => String(s).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 const safeFileName = (n) => String(n).normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-zA-Z0-9._-]+/g, "_");
 
@@ -3387,7 +3446,7 @@ function InfosTab({ uid, profile, update, notify }) {
     if (!f) return;
     setUploading(true);
     try {
-      const url = await uploadPublicImage(`avatars/${uid}`, await compressImage(f, 500));
+      const url = await uploadPublicImage(`avatars/${uid}`, await photoPersonne(f, 500));
       setD((x) => ({ ...x, photo: url }));
       if (await update({ photo: url })) notify("Photo mise à jour.");
     } catch (err) { notify(err.message, "error"); }
@@ -3970,7 +4029,7 @@ function ImageField({ label, value, onChange, folder, shape, notify }) {
     const f = e.target.files && e.target.files[0]; e.target.value = "";
     if (!f) return;
     setBusy(true);
-    try { onChange(await uploadPublicImage(folder, await compressImage(f, shape === "logo" ? 600 : 500))); }
+    try { onChange(await uploadPublicImage(folder, shape === "logo" ? await compressImage(f, 600) : await photoPersonne(f, 500))); }
     catch (err) { notify(err.message, "error"); }
     finally { setBusy(false); }
   };
@@ -4034,7 +4093,7 @@ function ImageSlot({ imgKey, label, sub, round, notify }) {
   const onFile = (e) => {
     const f = e.target.files && e.target.files[0]; e.target.value = "";
     if (!f) return;
-    run(async () => saveImage(imgKey, await compressImage(f, round ? 500 : 700)), `Image mise à jour : ${label}`);
+    run(async () => saveImage(imgKey, round ? await photoPersonne(f, 500) : await compressImage(f, 700)), `Image mise à jour : ${label}`);
   };
   return (
     <div className="flex items-center gap-4 p-4 rounded-2xl border border-slate-200 hover:border-orange-300 transition">
