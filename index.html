@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="fr">
 <head>
+<base href="/" />
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>CGE ARSTM — Conférence des Grandes Écoles</title>
@@ -599,9 +600,23 @@ const TRACKED = ["actualites", "evenements", "opportunites", "mediatheque"];
 // Pages du site : chacune a son adresse (cge-arstm.com/#evenements…), pour partager un lien et pour le bouton Retour.
 const PAGES_SITE = ["accueil", "apropos", "bureau", "actualites", "evenements", "opportunites", "alumni", "mediatheque", "partenaires", "adhesion", "contact", "profil", "admin"];
 // Page indiquée dans l'adresse ; toute autre valeur (par exemple celle ajoutée par Supabase après un email) mène à l'accueil.
+// Adresses propres (v103, site hébergé sur Cloudflare Pages) : cge-arstm.com/bureau.
+// Les anciens liens cge-arstm.com/#bureau sont convertis automatiquement ; les valeurs ajoutées par Supabase après un email ne sont pas touchées.
+const nettoyerAdresse = () => {
+  try {
+    const h = decodeURIComponent((window.location.hash || "").slice(1));
+    const chemin = decodeURIComponent(window.location.pathname || "/").replace(/^\/+|\/+$/g, "");
+    if (PAGES_SITE.includes(h)) window.history.replaceState(null, "", h === "accueil" ? "/" : "/" + h);
+    else if (chemin && !PAGES_SITE.includes(chemin) && !window.location.hash) window.history.replaceState(null, "", "/");
+    else if (chemin && window.location.pathname.endsWith("/")) window.history.replaceState(null, "", "/" + chemin + window.location.hash);
+  } catch (e) { /* adresse illisible : on ne touche à rien */ }
+};
 const pageFromHash = () => {
   let h = "";
-  try { h = decodeURIComponent((window.location.hash || "").slice(1)); } catch (e) { /* adresse illisible : accueil */ }
+  try {
+    const chemin = decodeURIComponent(window.location.pathname || "/").replace(/^\/+|\/+$/g, "");
+    h = chemin || decodeURIComponent((window.location.hash || "").slice(1));
+  } catch (e) { /* adresse illisible : accueil */ }
   return PAGES_SITE.includes(h) ? h : "accueil";
 };
 
@@ -876,7 +891,7 @@ function Lightbox({ photos, index, onClose, onIndex }) {
 // APPLICATION
 // =====================================================================
 function App() {
-  const [page, setPage] = useState(pageFromHash);
+  const [page, setPage] = useState(() => { nettoyerAdresse(); return pageFromHash(); });
   const [menuOpen, setMenuOpen] = useState(false);
   const [loginOpen, setLoginOpen] = useState(false);
   const [recovery, setRecovery] = useState(false);
@@ -1032,7 +1047,7 @@ function App() {
     setPage(p); setMenuOpen(false); window.scrollTo({ top: 0, behavior: "smooth" });
     // Adresse de la page dans la barre du navigateur (#evenements…) : liens partageables et bouton Retour.
     if (!depuisHistorique && pageFromHash() !== p) {
-      try { window.history.pushState(null, "", p === "accueil" ? window.location.pathname + window.location.search : "#" + p); } catch (e) { /* navigateur ancien : tant pis */ }
+      try { window.history.pushState(null, "", p === "accueil" ? "/" : "/" + p); } catch (e) { /* navigateur ancien : tant pis */ }
     }
   };
   const goContact = (subject) => { setContactSubject(subject || CONTACT_SUBJECTS[0]); go("contact"); };
