@@ -1541,7 +1541,7 @@ function App() {
             <main className="max-w-6xl mx-auto px-4 py-16 space-y-14">
               <div className="relative rounded-3xl overflow-hidden text-white p-8 md:p-10 flex flex-col md:flex-row items-center gap-8 shadow-2xl" style={{ background: NAVY }}>
                 <div className="absolute -right-10 -bottom-10 w-64 h-64 rounded-full bg-orange-500 opacity-20 blur-3xl" />
-                <MemberPhoto name={PRESIDENT.name} size="w-36 h-36" text="text-4xl" className="relative ring-8 ring-white ring-opacity-10" />
+                <MemberPhoto name={PRESIDENT.name} size="w-36 h-36 md:w-44 md:h-44" text="text-4xl" className="relative ring-8 ring-white ring-opacity-10" />
                 <div className="relative text-center md:text-left">
                   <span className="px-3 py-1 rounded-full bg-orange-600 text-xs font-bold uppercase tracking-wider">Président</span>
                   <h2 className="text-3xl md:text-4xl font-extrabold mt-3">{PRESIDENT.name}</h2>
@@ -1554,14 +1554,14 @@ function App() {
                     <span className="w-1.5 h-7 rounded-full bg-orange-600" />
                     <h3 className="text-2xl font-bold text-slate-900">{g.dept}</h3>
                   </div>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-5">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-5">{/* Trombinoscope du bureau (v100) : grandes photos carrées */}
                     {g.members.filter(([n]) => n !== PRESIDENT.name).map(([name, role], i) => (
-                      <div key={name} className="group bg-white rounded-3xl p-6 text-center shadow-sm hover:shadow-xl hover:-translate-y-1 transition duration-300">
-                        <div className="flex justify-center group-hover:scale-105 transition">
-                          <MemberPhoto name={name} gradient={i === 0 ? "from-orange-500 to-amber-400" : "from-slate-800 to-slate-600"} />
+                      <div key={name} className="group bg-white rounded-3xl overflow-hidden text-center shadow-sm hover:shadow-xl hover:-translate-y-1 transition duration-300">
+                        <div className="aspect-square overflow-hidden bg-slate-100">
+                          <MemberPhoto name={name} size="w-full h-full" text="text-4xl" className="!rounded-none object-[center_25%] group-hover:scale-105 transition duration-500" gradient={i === 0 ? "from-orange-500 to-amber-400" : "from-slate-800 to-slate-600"} />
                         </div>
-                        <p className="font-bold text-slate-900 mt-4 text-sm">{name}</p>
-                        <p className={`text-xs mt-1 font-medium ${i === 0 ? "text-orange-600" : "text-slate-500"}`}>{role}</p>
+                        <p className="font-bold text-slate-900 mt-4 px-3 text-sm sm:text-base leading-snug">{name}</p>
+                        <p className={`text-xs sm:text-sm mt-1 px-3 pb-5 font-medium ${i === 0 ? "text-orange-600" : "text-slate-500"}`}>{role}</p>
                       </div>
                     ))}
                   </div>
