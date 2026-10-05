@@ -1555,13 +1555,23 @@ function App() {
                     <h3 className="text-2xl font-bold text-slate-900">{g.dept}</h3>
                   </div>
                   <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-5">{/* Trombinoscope du bureau (v100) : grandes photos carrées */}
-                    {g.members.filter(([n]) => n !== PRESIDENT.name).map(([name, role], i) => (
-                      <div key={name} className="group bg-white rounded-3xl overflow-hidden text-center shadow-sm hover:shadow-xl hover:-translate-y-1 transition duration-300">
-                        <div className="aspect-square overflow-hidden bg-slate-100">
-                          <MemberPhoto name={name} size="w-full h-full" text="text-4xl" className="!rounded-none object-[center_25%] group-hover:scale-105 transition duration-500" gradient={i === 0 ? "from-orange-500 to-amber-400" : "from-slate-800 to-slate-600"} />
+                    {groupesCompartiments(g.members.filter(([n]) => n !== PRESIDENT.name)).map((bloc, b) => (
+                      <div key={bloc.titre || "membres"} className={"col-span-full" + (b > 0 ? " mt-4" : "")}>
+                        {/* Trombinoscope du bureau (v100) · compartiments (v101) */}
+                        {bloc.titre && (
+                          <p className="flex items-center gap-3 mb-4 text-sm font-bold text-orange-700"><span className="w-8 h-0.5 rounded-full bg-orange-400 flex-shrink-0" />Compartiment {bloc.titre}</p>
+                        )}
+                        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-5">
+                          {bloc.membres.map(([name, role], i) => (
+                            <div key={name} className="group bg-white rounded-3xl overflow-hidden text-center shadow-sm hover:shadow-xl hover:-translate-y-1 transition duration-300">
+                              <div className="aspect-square overflow-hidden bg-slate-100">
+                                <MemberPhoto name={name} size="w-full h-full" text="text-4xl" className="!rounded-none object-[center_25%] group-hover:scale-105 transition duration-500" gradient={i === 0 ? "from-orange-500 to-amber-400" : "from-slate-800 to-slate-600"} />
+                              </div>
+                              <p className="font-bold text-slate-900 mt-4 px-3 text-sm sm:text-base leading-snug">{name}</p>
+                              <p className={`text-xs sm:text-sm mt-1 px-3 pb-5 font-medium ${i === 0 ? "text-orange-600" : "text-slate-500"}`}>{role}</p>
+                            </div>
+                          ))}
                         </div>
-                        <p className="font-bold text-slate-900 mt-4 px-3 text-sm sm:text-base leading-snug">{name}</p>
-                        <p className={`text-xs sm:text-sm mt-1 px-3 pb-5 font-medium ${i === 0 ? "text-orange-600" : "text-slate-500"}`}>{role}</p>
                       </div>
                     ))}
                   </div>
@@ -1917,6 +1927,19 @@ function AnciensBureaux({ postes }) {
     </section>
   );
 }
+
+// Page « Le bureau » : regroupe les membres consécutifs d'un département par compartiment
+// (3e élément facultatif dans config.js, par exemple ["HOBA EKRA", "Commissaire aux Comptes", "Commissariat aux comptes"]).
+const groupesCompartiments = (membres) => {
+  const blocs = [];
+  (membres || []).forEach((m) => {
+    const titre = String((m && m[2]) || "").trim();
+    const dernier = blocs[blocs.length - 1];
+    if (dernier && dernier.titre === titre) dernier.membres.push(m);
+    else blocs.push({ titre, membres: [m] });
+  });
+  return blocs;
+};
 
 function Home({ go, user, openLogin, visibleNews, upcoming, nextEvent, homeOpps, homeStats, testimonials, partenaires, pollsToVote, countsFor, onVote, isNewsNew }) {
   const left = nextEvent ? daysUntil(nextEvent.date) : null;
