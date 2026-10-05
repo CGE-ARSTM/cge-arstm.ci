@@ -19,12 +19,11 @@ window.CGE_CONFIG = {
   },
 
   // Bureau exécutif : chaque membre s'écrit ["NOM PRÉNOM", "Fonction"],
-  // Le département Finances est présenté en deux compartiments : Trésorerie, puis Commissariat aux comptes.
   BUREAU: [
     { dept: "Présidence", members: [["NANGUI AKRE", "Président"], ["SYLLA YACOUBA", "Vice-Président"]] },
     { dept: "Secrétariat Général", members: [["COULIBALY DAVID", "Secrétaire Général"], ["GUIRA CHEICK", "Secrétaire Général Adjoint"]] },
-    { dept: "Finances · Compartiment Trésorerie", members: [["OUATTARA INES", "Trésorière Générale"], ["ZADI MARIA AUDE", "Trésorière Adjointe"]] },
-    { dept: "Finances · Compartiment Commissariat aux comptes", members: [["HOBA EKRA", "Commissaire aux Comptes"]] },
+    // Finances : le 3e élément de chaque membre est son compartiment (sous-titre sur la page « Le bureau »).
+    { dept: "Finances", members: [["OUATTARA INES", "Trésorière Générale", "Trésorerie"], ["ZADI MARIA AUDE", "Trésorière Adjointe", "Trésorerie"], ["HOBA EKRA", "Commissaire aux Comptes", "Commissariat aux comptes"]] },
     { dept: "Informatique", members: [["KOUAKOU MARC-ARTHUR", "Chef de département"], ["KOLOGA MOUHAMMED", "Adjoint"]] },
     { dept: "Projets", members: [["ALLOH N'CHOH", "Chef de département"], ["ATTA KOUAO", "Adjoint"]] },
     { dept: "Communication", members: [["APOMOLIA APO", "Chef de département"], ["MAMBO INCHOT", "Adjoint"]] },
