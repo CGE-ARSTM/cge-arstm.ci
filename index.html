@@ -3843,8 +3843,36 @@ function LoginModal({ onClose, onLogin, onRegister, onForgot }) {
   const [email, setEmail] = useState("");
   const [pwd, setPwd] = useState("");
   const [reg, setReg] = useState(EMPTY_REG);
+  const [regTouched, setRegTouched] = useState({});
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
+
+  // Validation stricte de l'inscription : aucun champ incomplet ou incohérent
+  // ne peut être envoyé. Les mêmes règles sont réutilisées au clic sur le bouton.
+  const REG_RULES = {
+    prenoms: /^[A-Za-zÀ-ÖØ-öø-ÿ]+(?:[\s'-][A-Za-zÀ-ÖØ-öø-ÿ]+)*$/,
+    nom: /^[A-Za-zÀ-ÖØ-öø-ÿ]+(?:[\s'-][A-Za-zÀ-ÖØ-öø-ÿ]+)*$/,
+    matricule: /^\d{4}-\d{4}$/,
+    email: EMAIL_RE,
+    promotion: /^\d{1,3}$/,
+    password: /^.{8,}$/,
+  };
+  const regValid = (k, value = reg[k]) => {
+    const v = String(value ?? "").trim();
+    if (["prenoms", "nom", "matricule", "email", "filiere", "promotion", "password", "confirm"].includes(k) && !v) return false;
+    if (REG_RULES[k] && !REG_RULES[k].test(v)) return false;
+    if (k === "confirm" && v !== reg.password) return false;
+    return true;
+  };
+  const regAllValid = (r = reg) => {
+    const required = ["prenoms", "nom", "matricule", "email", "filiere", "promotion", "password", "confirm"];
+    if (required.some((k) => !regValid(k, r[k]))) return false;
+    if (r.type === "ancien" && !r.cge_ancien) return false;
+    if (r.type === "ancien" && r.cge_ancien === "oui" && erreurPostes(r.postes_cge)) return false;
+    return true;
+  };
+  const touchReg = (k) => setRegTouched((t) => ({ ...t, [k]: true }));
+  const fieldError = (k) => regTouched[k] && !regValid(k) ? "Champ mal rempli" : "";
 
   const switchMode = (m) => { setMode(m); setErr(""); };
   const run = async (fn) => {
@@ -3862,15 +3890,12 @@ function LoginModal({ onClose, onLogin, onRegister, onForgot }) {
 
   const register = () => run(async () => {
     const r = { ...reg, prenoms: reg.prenoms.trim(), nom: reg.nom.trim(), matricule: reg.matricule.trim(), email: reg.email.trim(), promotion: reg.promotion.trim() };
-    if (!r.prenoms || !r.nom || !r.matricule || !r.email || !r.filiere || !r.promotion) return setErr("Tous les champs sont obligatoires.");
-    if (!EMAIL_RE.test(r.email)) return setErr("Adresse email invalide.");
-    if (r.type === "ancien" && !r.cge_ancien) return setErr("Indiquez si vous avez occupé un poste à la CGE.");
-    if (r.type === "ancien" && r.cge_ancien === "oui") { const ep = erreurPostes(r.postes_cge); if (ep) return setErr(ep); }
-    if (r.password.length < 8) return setErr("Le mot de passe doit contenir au moins 8 caractères.");
-    if (r.password !== r.confirm) return setErr("Les deux mots de passe ne correspondent pas.");
+    const required = ["prenoms", "nom", "matricule", "email", "filiere", "promotion", "password", "confirm"];
+    setRegTouched((t) => ({ ...t, ...Object.fromEntries(required.map((k) => [k, true])), ...(r.type === "ancien" ? { cge_ancien: true } : {}) }));
+    if (!regAllValid(r)) return setErr("Champ mal rempli");
     const e = await onRegister(r);
     if (e) return setErr(e);
-    setEmail(r.email); setPwd(""); setReg(EMPTY_REG); setMode("done");
+    setEmail(r.email); setPwd(""); setReg(EMPTY_REG); setRegTouched({}); setMode("done");
   });
 
   const forgot = () => run(async () => {
@@ -3880,12 +3905,21 @@ function LoginModal({ onClose, onLogin, onRegister, onForgot }) {
     setMode("sent");
   });
 
-  const regField = (label, k, type = "text", placeholder = "") => (
-    <label className="block">
-      <span className="text-xs font-semibold text-slate-600">{label}</span>
-      <input type={type} value={reg[k]} placeholder={placeholder} onChange={(e) => { setReg({ ...reg, [k]: e.target.value }); setErr(""); }} className={inputCls} />
-    </label>
-  );
+  const regField = (label, k, type = "text", placeholder = "") => {
+    const invalid = regTouched[k] && !regValid(k);
+    return (
+      <label className="block">
+        <span className="text-xs font-semibold text-slate-600">{label}</span>
+        <input type={type} value={reg[k]} placeholder={placeholder}
+          onBlur={() => touchReg(k)}
+          onChange={(e) => { setReg({ ...reg, [k]: e.target.value }); touchReg(k); setErr(""); }}
+          className={`${inputCls} ${invalid ? "border-rose-500 ring-1 ring-rose-200" : ""}`}
+          aria-invalid={invalid}
+        />
+        {invalid && <p className="text-xs font-semibold text-rose-600 mt-1">Champ mal rempli</p>}
+      </label>
+    );
+  };
 
   const titles = {
     login: ["Espace membre", "Connectez-vous avec votre email."],
@@ -3928,9 +3962,10 @@ function LoginModal({ onClose, onLogin, onRegister, onForgot }) {
           {regField("Email (servira à vous connecter)", "email", "email", "ex. kouamejean@gmail.com")}
           <div className="grid grid-cols-2 gap-3">
             <label className="block"><span className="text-xs font-semibold text-slate-600">Filière</span>
-              <select value={reg.filiere} onChange={(e) => { setReg({ ...reg, filiere: e.target.value }); setErr(""); }} className={inputCls}>
+              <select value={reg.filiere} onBlur={() => touchReg("filiere")} onChange={(e) => { setReg({ ...reg, filiere: e.target.value }); touchReg("filiere"); setErr(""); }} className={`${inputCls} ${regTouched.filiere && !regValid("filiere") ? "border-rose-500 ring-1 ring-rose-200" : ""}`} aria-invalid={regTouched.filiere && !regValid("filiere")}>
                 <option value="">Choisir...</option>{FILIERES.map((f) => <option key={f}>{f}</option>)}
               </select>
+              {regTouched.filiere && !regValid("filiere") && <p className="text-xs font-semibold text-rose-600 mt-1">Champ mal rempli</p>}
             </label>
             {regField("Promotion (numéro)", "promotion", "text", "ex. 38")}
             <p className="col-span-2 -mt-1 text-xs text-slate-500">Indiquez le numéro de votre promotion à l'ARSTM (par exemple 38), pas une année.</p>
@@ -3938,14 +3973,17 @@ function LoginModal({ onClose, onLogin, onRegister, onForgot }) {
           {reg.type === "ancien" && (
             <div className="p-4 rounded-2xl bg-orange-50 border border-orange-100 space-y-3">
               <p className="text-sm font-semibold text-slate-900">Avez-vous occupé un poste à la CGE pendant votre scolarité ?</p>
-              <OuiNon value={reg.cge_ancien} onChange={(v) => { setReg({ ...reg, cge_ancien: v }); setErr(""); }} />
-              {reg.cge_ancien === "oui" && <PostesEditor value={reg.postes_cge} onChange={(postes_cge) => { setReg({ ...reg, postes_cge }); setErr(""); }} />}
+              <OuiNon value={reg.cge_ancien} onChange={(v) => { setReg({ ...reg, cge_ancien: v }); touchReg("cge_ancien"); setErr(""); }} />
+              {regTouched.cge_ancien && !reg.cge_ancien && <p className="text-xs font-semibold text-rose-600">Champ mal rempli</p>}
+              {reg.type === "ancien" && reg.cge_ancien === "oui" && <PostesEditor value={reg.postes_cge} onChange={(postes_cge) => { setReg({ ...reg, postes_cge }); setErr(""); }} />}
+              {reg.type === "ancien" && reg.cge_ancien === "oui" && regTouched.cge_ancien && erreurPostes(reg.postes_cge) && <p className="text-xs font-semibold text-rose-600">Champ mal rempli</p>}
             </div>
           )}
           {regField("Mot de passe (8 caractères min.)", "password", "password")}
           {regField("Confirmer le mot de passe", "confirm", "password")}
-          {err && <p className="text-sm text-rose-600">{err}</p>}
-          <button onClick={register} disabled={busy} className={btn}><UserPlus size={18} /> {busy ? "Envoi..." : "Envoyer ma demande"}</button>
+          {err && <p className="text-sm text-rose-600 font-semibold">{err}</p>}
+          <button onClick={register} disabled={busy || !regAllValid()} className={btn}><UserPlus size={18} /> {busy ? "Envoi..." : "Envoyer ma demande"}</button>
+          <p className="text-xs text-slate-500 text-center">Exemples : matricule <strong>2024-1234</strong> · promotion <strong>38</strong> · mot de passe <strong>8 caractères minimum</strong>.</p>
         </div>
       )}
 
