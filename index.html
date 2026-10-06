@@ -55,6 +55,52 @@
   html { overflow-x: hidden; }
   body { overflow-x: clip; max-width: 100%; }
   img, svg, video { max-width: 100%; }
+
+  /* ===== Mon espace : correctifs mobile ===== */
+  .profile-space-tabs {
+    scrollbar-width: thin;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-color: rgba(148,163,184,.55) transparent;
+  }
+  .profile-space-tabs::-webkit-scrollbar { height: 4px; }
+  .profile-space-tabs::-webkit-scrollbar-track { background: transparent; }
+  .profile-space-tabs::-webkit-scrollbar-thumb { background: rgba(148,163,184,.55); border-radius: 999px; }
+
+  /* Évite qu'un texte, une URL ou une ligne flex fasse déborder toute la page. */
+  .profile-space-tabs,
+  .profile-space-tabs *,
+  main[class*="max-w-6xl"],
+  main[class*="max-w-6xl"] > * {
+    min-width: 0;
+  }
+  @media (max-width: 1023px) {
+    .profile-space-tabs {
+      width: 100%;
+      max-width: 100%;
+      overflow-x: auto;
+      overflow-y: hidden;
+      flex-wrap: nowrap !important;
+      touch-action: pan-x;
+    }
+    .profile-space-tab {
+      max-width: calc(100vw - 48px);
+    }
+  }
+  @media (max-width: 639px) {
+    .profile-space-tab {
+      font-size: .8125rem;
+      padding: .625rem .75rem;
+    }
+  }
+  .profile-space-tabs button,
+  .profile-space-tabs span,
+  .profile-space-tabs svg {
+    flex-shrink: 0;
+  }
+  .profile-space-tabs span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
   @keyframes waveMove{from{transform:translateX(0)}to{transform:translateX(-50%)}}
   .wave-slow{animation:waveMove 18s linear infinite}.wave-fast{animation:waveMove 10s linear infinite}
   @keyframes floatY{0%,100%{transform:translateY(0)}50%{transform:translateY(-14px)}}.float{animation:floatY 5s ease-in-out infinite}
@@ -3079,24 +3125,26 @@ function ProfileSpace({ uid, profile, update, pct, fullName, applications, regis
         <Waves />
       </section>
 
-      <main className="max-w-6xl mx-auto px-4 py-10 grid lg:grid-cols-4 gap-6">
-        <aside className="lg:col-span-1">
-          <div className="bg-white rounded-3xl shadow-sm p-5 lg:sticky lg:top-24">
-            <div className="mb-4">
-              <div className="flex justify-between text-xs font-semibold text-slate-600"><span>Profil complété</span><span className="text-orange-600">{pct} %</span></div>
+      <main className="max-w-6xl mx-auto px-3 sm:px-4 py-8 sm:py-10 grid lg:grid-cols-4 gap-5 lg:gap-6 min-w-0">
+        <aside className="lg:col-span-1 min-w-0">
+          <div className="bg-white rounded-2xl sm:rounded-3xl shadow-sm p-3 sm:p-5 lg:sticky lg:top-24 min-w-0">
+            <div className="mb-3 sm:mb-4 px-1">
+              <div className="flex justify-between gap-3 text-xs font-semibold text-slate-600">
+                <span>Profil complété</span><span className="text-orange-600">{pct} %</span>
+              </div>
               <div className="mt-2 h-2 rounded-full bg-slate-100 overflow-hidden"><div className="h-full rounded-full bg-gradient-to-r from-orange-500 to-amber-400" style={{ width: `${pct}%`, transition: "width .6s" }} /></div>
             </div>
-            <nav className="flex lg:flex-col gap-1 overflow-x-auto">
+            <nav aria-label="Navigation de Mon espace" className="profile-space-tabs flex lg:flex-col gap-1 overflow-x-auto lg:overflow-x-visible pb-1 lg:pb-0 overscroll-x-contain">
               {tabs.map(([id, label, Icon]) => (
-                <button key={id} onClick={() => setTab(id)} className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium whitespace-nowrap transition ${tab === id ? "bg-orange-600 text-white shadow-md" : "text-slate-600 hover:bg-orange-50 hover:text-orange-700"}`}>
-                  <Icon size={17} /> {label}
+                <button key={id} onClick={() => setTab(id)} className={`profile-space-tab flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-medium whitespace-nowrap transition flex-shrink-0 lg:w-full ${tab === id ? "bg-orange-600 text-white shadow-md" : "text-slate-600 hover:bg-orange-50 hover:text-orange-700"}`}>
+                  <Icon size={17} className="flex-shrink-0" /> <span>{label}</span>
                 </button>
               ))}
             </nav>
           </div>
         </aside>
 
-        <div key={tab} className="lg:col-span-3 fade-up">
+        <div key={tab} className="lg:col-span-3 min-w-0 fade-up">
           {tab !== "cotisations" && <RappelCotisations onOpen={() => setTab("cotisations")} />}
           {tab === "cotisations" && <MesCotisations />}
           {tab === "dashboard" && <Dashboard profile={profile} pct={pct} fullName={fullName} applications={applications} registrations={registrations} events={events} setTab={setTab} go={go} />}
@@ -3124,9 +3172,9 @@ function ProfileSpace({ uid, profile, update, pct, fullName, applications, regis
               ) : (
                 <ul className="divide-y divide-slate-100">
                   {applications.map((a) => (
-                    <li key={a.id} className="py-4 flex items-center justify-between gap-4">
-                      <div><p className="font-bold text-slate-900">{a.title}</p><p className="text-sm text-slate-500">{a.company} · envoyée le {fmtDate(a.date)}</p></div>
-                      <span className={`px-3 py-1 rounded-full text-xs font-bold whitespace-nowrap ${STATUS_STYLES[a.status] || STATUS_STYLES["Envoyée"]}`}>{a.status}</span>
+                    <li key={a.id} className="py-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-4 min-w-0">
+                      <div className="min-w-0"><p className="font-bold text-slate-900 break-words">{a.title}</p><p className="text-sm text-slate-500 break-words">{a.company} · envoyée le {fmtDate(a.date)}</p></div>
+                      <span className={`self-start sm:self-auto px-3 py-1 rounded-full text-xs font-bold whitespace-nowrap flex-shrink-0 ${STATUS_STYLES[a.status] || STATUS_STYLES["Envoyée"]}`}>{a.status}</span>
                     </li>
                   ))}
                 </ul>
