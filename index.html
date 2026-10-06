@@ -1994,10 +1994,17 @@ function AnciensBureaux({ postes }) {
 const groupesCompartiments = (membres) => {
   const blocs = [];
   (membres || []).forEach((m) => {
-    const titre = String((m && m[2]) || "").trim();
+    const nom = String((m && m[0]) || "").trim();
+    const role = String((m && m[1]) || "").trim();
+    // Compatibilité avec les anciennes données enregistrées sans le 3e élément.
+    // Cela permet notamment de remettre automatiquement le commissaire dans son sous-groupe.
+    let titre = String((m && m[2]) || "").trim();
+    if (!titre && /commissaire\s+aux\s+comptes/i.test(role)) titre = "Commissariat aux comptes";
+    else if (!titre && /(trésorier|trésorière)/i.test(role)) titre = "Trésorerie";
+    const membre = [nom, role, titre];
     const dernier = blocs[blocs.length - 1];
-    if (dernier && dernier.titre === titre) dernier.membres.push(m);
-    else blocs.push({ titre, membres: [m] });
+    if (dernier && dernier.titre === titre) dernier.membres.push(membre);
+    else blocs.push({ titre, membres: [membre] });
   });
   return blocs;
 };
@@ -4540,10 +4547,11 @@ function BureauSettings({ cur, change, commit, resetKeys, notify }) {
                 <ConfirmButton onConfirm={() => setBureau((b) => b.filter((_, j) => j !== i))} confirmLabel="Retirer ?" ariaLabel="Retirer le département" className="p-2 rounded-lg text-rose-600 hover:bg-rose-50"><Trash2 size={16} /></ConfirmButton>
               </div>
               <div className="mt-3 space-y-2">
-                {d.members.map(([n, r], j) => (
-                  <div key={j} className="grid grid-cols-[1fr_1fr_auto] gap-2">
+                {d.members.map(([n, r, sub], j) => (
+                  <div key={j} className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_1fr_auto] gap-2">
                     <input value={n} onChange={(e) => setMember(i, j, 0, e.target.value)} placeholder="NOM Prénom" className={inputCls + " mt-0"} />
                     <input value={r} onChange={(e) => setMember(i, j, 1, e.target.value)} placeholder="Fonction" className={inputCls + " mt-0"} />
+                    <input value={sub || ""} onChange={(e) => setMember(i, j, 2, e.target.value)} placeholder="Sous-groupe (ex. Trésorerie)" className={inputCls + " mt-0"} />
                     <button onClick={() => editDept(i, (x) => ({ ...x, members: x.members.filter((_, y) => y !== j) }))} aria-label="Retirer ce membre" title="Retirer ce membre" className="p-2 rounded-lg text-rose-600 hover:bg-rose-50"><X size={16} /></button>
                   </div>
                 ))}
