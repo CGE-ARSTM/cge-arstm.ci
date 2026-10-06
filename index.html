@@ -4495,12 +4495,12 @@ function BureauSettings({ cur, change, commit, resetKeys, notify }) {
   const [busy, setBusy] = useState(false);
   const setBureau = (fn) => setS((x) => ({ ...x, bureau: fn(x.bureau) }));
   const editDept = (i, fn) => setBureau((b) => b.map((d, j) => (j === i ? fn(d) : d)));
-  const setMember = (i, j, pos, v) => editDept(i, (d) => ({ ...d, members: d.members.map((m, y) => (y !== j ? m : pos === 0 ? [v, m[1]] : [m[0], v])) }));
+  const setMember = (i, j, pos, v) => editDept(i, (d) => ({ ...d, members: d.members.map((m, y) => (y !== j ? m : pos === 0 ? [v, m[1], m[2]] : pos === 1 ? [m[0], v, m[2]] : [m[0], m[1], v])) }));
   const moveDept = (i, dir) => setBureau((b) => { const j = i + dir; if (j < 0 || j >= b.length) return b; const n = [...b]; [n[i], n[j]] = [n[j], n[i]]; return n; });
   const names = s.bureau.flatMap((d) => d.members.map(([n]) => String(n).trim())).filter(Boolean);
   const save = async () => {
     const bureau = s.bureau
-      .map((d) => ({ dept: String(d.dept).trim(), members: d.members.map(([n, r]) => [String(n).trim(), String(r).trim()]).filter(([n]) => n) }))
+      .map((d) => ({ dept: String(d.dept).trim(), members: d.members.map((m) => [String(m?.[0] || "").trim(), String(m?.[1] || "").trim(), String(m?.[2] || "").trim()]).map((m) => m[2] ? m : m.slice(0, 2)).filter(([n]) => n) }))
       .filter((d) => d.dept && d.members.length);
     const pres = { name: String(s.pres.name || "").trim(), message: String(s.pres.message || "").trim() };
     if (!pres.name) return notify("Indiquez le nom du président.", "error");
