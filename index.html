@@ -2124,12 +2124,11 @@ function Home({ go, user, openLogin, visibleNews, upcoming, nextEvent, homeOpps,
         </section>
       )}
 
-      {/* OPPORTUNITÉS DU MOMENT */}
+      {/* OPPORTUNITÉS DU MOMENT : section masquée quand il n'y en a aucune */}
+      {homeOpps.length > 0 && (
       <section className="max-w-6xl mx-auto px-4 pt-20">
         <SectionTitle kicker="Ne les ratez pas" title="Opportunités du moment" action="Toutes les opportunités" onAction={() => go("opportunites")} />
-        {homeOpps.length === 0 ? (
-          <div className="bg-white rounded-3xl p-8 text-center text-slate-500 shadow-sm">Aucune opportunité ouverte pour le moment. Revenez bientôt !</div>
-        ) : (
+        {(
           <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-5">
             {homeOpps.map((j) => (
               <button key={j.id} onClick={() => go("opportunites")} className="group text-left bg-white rounded-3xl p-6 shadow-sm hover:shadow-xl hover:-translate-y-1 transition flex flex-col">
@@ -2143,7 +2142,9 @@ function Home({ go, user, openLogin, visibleNews, upcoming, nextEvent, homeOpps,
           </div>
         )}
       </section>
+      )}
 
+      {upcoming.length > 0 && (
       <section className="max-w-6xl mx-auto px-4 pt-20">
         <SectionTitle kicker="Agenda" title="Prochains événements" action="Voir l'agenda" onAction={() => go("evenements")} />
         <div className="grid md:grid-cols-3 gap-6">
@@ -2155,16 +2156,18 @@ function Home({ go, user, openLogin, visibleNews, upcoming, nextEvent, homeOpps,
               <div><h4 className="font-bold text-slate-900">{e.title}</h4><p className="text-sm text-slate-500 mt-1">{[e.place, e.time].filter(Boolean).join(" · ")}</p></div>
             </button>
           ); })}
-          {upcoming.length === 0 && <p className="text-slate-500 md:col-span-3">Aucun événement à venir pour le moment.</p>}
         </div>
       </section>
+      )}
 
+      {visibleNews.length > 0 && (
       <section className="max-w-6xl mx-auto px-4 pt-20">
         <SectionTitle kicker="En ce moment" title="Dernières actualités" action="Tout voir" onAction={() => go("actualites")} />
         <div className="grid md:grid-cols-3 gap-6">
           {visibleNews.slice(0, 3).map((n, i) => <NewsCard key={n.id} n={n} i={i} isNew={isNewsNew(n)} />)}
         </div>
       </section>
+      )}
 
       {testimonials.length > 0 && (
         <section className="max-w-6xl mx-auto px-4 pt-20">
