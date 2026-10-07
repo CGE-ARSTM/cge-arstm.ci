@@ -213,7 +213,7 @@ const Anchor = pickIcon("Anchor"), Menu = pickIcon("Menu"), X = pickIcon("X"), C
   Vote = pickIcon("Vote", "CheckSquare"), Video = pickIcon("Video", "PlayCircle"), PlayCircle = pickIcon("PlayCircle", "Play"),
   Link2 = pickIcon("Link2", "Link"), FolderOpen = pickIcon("FolderOpen", "Folder"),
   HistoryIcon = pickIcon("History", "Clock"), SettingsIcon = pickIcon("Settings", "SlidersHorizontal"), UserCog = pickIcon("UserCog", "Shield"),
-  ArrowUp = pickIcon("ArrowUp", "ChevronUp"), ArrowDown = pickIcon("ArrowDown", "ChevronDown");
+  ArrowUp = pickIcon("ArrowUp", "ChevronUp"), ArrowDown = pickIcon("ArrowDown", "ChevronDown"), Star = pickIcon("Star", "Award");
 
 // =====================================================================
 // Valeurs d'origine : fichier config.js. L'administrateur peut ensuite les modifier depuis le site
@@ -366,7 +366,7 @@ const PERMISSIONS = [
   ["jobs", "Opportunités", "Publier les offres de stage, d'emploi, de bourse…"],
   ["candidatures", "Candidatures", "Suivre les candidatures et consulter les profils et CV des candidats."],
   ["documents", "Documents & vidéos", "Ajouter des fichiers et des liens à la médiathèque."],
-  ["galerie", "Galerie photos", "Ajouter et supprimer des photos."],
+  ["galerie", "Galerie photos", "Ajouter, organiser et supprimer des photos et des albums."],
   ["sondages", "Sondages", "Créer et clore des sondages."],
   ["temoignages", "Témoignages", "Valider et publier les témoignages des anciens."],
   ["partenaires", "Partenaires", "Gérer la liste et les logos des partenaires."],
@@ -2561,6 +2561,23 @@ function MentorRequestModal({ mentor, profile, onClose, onSend }) {
   );
 }
 
+// Albums : regroupe les photos par album, applique l'ordre choisi dans l'administration et la miniature (couverture).
+const photoRank = (p) => (Number.isFinite(p.ordre) ? p.ordre : 1e9);
+function buildAlbums(photos) {
+  const map = {};
+  photos.forEach((p) => {
+    const a = map[p.album] || (map[p.album] = { nom: p.album, photos: [], date: p.date || "", ordre: null });
+    a.photos.push(p);
+    if ((p.date || "") > a.date) a.date = p.date;
+    if (Number.isFinite(p.album_ordre) && (a.ordre === null || p.album_ordre < a.ordre)) a.ordre = p.album_ordre;
+  });
+  return Object.values(map).map((a) => {
+    a.photos.sort((x, y) => photoRank(x) - photoRank(y) || String(x.created_at).localeCompare(String(y.created_at)));
+    a.cover = a.photos.find((p) => p.couverture) || a.photos[0];
+    return a;
+  }).sort((x, y) => (x.ordre === null ? 1e9 : x.ordre) - (y.ordre === null ? 1e9 : y.ordre) || String(y.date).localeCompare(String(x.date)));
+}
+
 // =====================================================================
 // MÉDIATHÈQUE : photos, documents, vidéos
 // =====================================================================
@@ -2572,12 +2589,7 @@ function MediaPage({ user, canSeeDocs, documents, photos, notify, openLogin, sin
   const [cat, setCat] = useState("Toutes");
   const [q, setQ] = useState("");
 
-  const albums = Object.values(photos.reduce((acc, p) => {
-    if (!acc[p.album]) acc[p.album] = { nom: p.album, photos: [], date: p.date };
-    acc[p.album].photos.push(p);
-    if (p.date > acc[p.album].date) acc[p.album].date = p.date;
-    return acc;
-  }, {})).sort((a, b) => b.date.localeCompare(a.date));
+  const albums = buildAlbums(photos);
   const current = album && albums.find((a) => a.nom === album);
   const files = documents.filter((d) => d.type !== "video");
   const videos = documents.filter((d) => d.type === "video");
@@ -2602,7 +2614,7 @@ function MediaPage({ user, canSeeDocs, documents, photos, notify, openLogin, sin
               {albums.map((a) => (
                 <button key={a.nom} onClick={() => setAlbum(a.nom)} className="group text-left bg-white rounded-3xl overflow-hidden shadow-sm hover:shadow-2xl hover:-translate-y-1 transition duration-300">
                   <div className="relative aspect-video bg-slate-100 overflow-hidden">
-                    <img src={a.photos[0].url} alt={a.nom} loading="lazy" className="w-full h-full object-cover group-hover:scale-105 transition duration-500" />
+                    <img src={a.cover.url} alt={a.nom} loading="lazy" className="w-full h-full object-cover group-hover:scale-105 transition duration-500" />
                     <span className="absolute bottom-3 right-3 px-2.5 py-1 rounded-lg bg-black bg-opacity-60 text-white text-xs font-semibold flex items-center gap-1"><Camera size={12} /> {a.photos.length}</span>
                     {a.photos.some((p) => newer(p.created_at, since)) && <NewBadge className="absolute top-3 left-3 shadow" />}
                   </div>
@@ -4602,25 +4614,48 @@ function ImagesManager({ notify }) {
   );
 }
 
-// Galerie : ajout de photos par album (plusieurs à la fois), légendes, suppression.
+// Galerie : ajout de photos par album, organisation des albums (ordre, nom, miniature), organisation des photos
+// (ordre, déplacement d'un album à l'autre, légendes), suppression.
+const GALLERY_SQL = `alter table public.photos add column if not exists ordre integer;
+alter table public.photos add column if not exists album_ordre integer;
+alter table public.photos add column if not exists couverture boolean not null default false;`;
+
 function AdminGallery({ photos, setPhotos, notify }) {
-  const albumNames = [...new Set(photos.map((p) => p.album))];
+  const albums = buildAlbums(photos);
+  const albumNames = albums.map((a) => a.nom);
   const [album, setAlbum] = useState(albumNames[0] || "__new");
   const [newAlbum, setNewAlbum] = useState("");
   const [date, setDate] = useState(todayISO());
   const [progress, setProgress] = useState(null);
-  const target = album === "__new" ? newAlbum.trim() : album;
+  const [renaming, setRenaming] = useState(null); // { from, value }
+  const [dragId, setDragId] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const albumSel = album === "__new" || albumNames.includes(album) ? album : (albumNames[0] || "__new");
+  const target = albumSel === "__new" ? newAlbum.trim() : albumSel;
+  // Les colonnes d'organisation existent-elles dans la base ? (script SQL à lancer une seule fois)
+  const ready = photos.length === 0 || "ordre" in photos[0];
+
+  // Un nouvel album passe en tête (si l'ordre des albums a déjà été choisi).
+  const firstAlbumOrder = () => {
+    const used = albums.map((a) => a.ordre).filter((o) => Number.isFinite(o));
+    return used.length ? Math.min(...used) - 1 : null;
+  };
 
   const onFiles = async (e) => {
     const files = Array.from(e.target.files || []); e.target.value = "";
     if (!files.length) return;
     if (!target) return notify("Choisissez un album ou donnez un nom au nouvel album.", "error");
+    const existing = albums.find((a) => a.nom === target);
+    let nextPos = existing ? Math.max(-1, ...existing.photos.map((p) => (Number.isFinite(p.ordre) ? p.ordre : -1))) + 1 : 0;
+    const albumOrder = existing ? existing.ordre : firstAlbumOrder();
     const added = []; let fails = 0;
     for (let i = 0; i < files.length; i++) {
       setProgress(`${i + 1} / ${files.length}`);
       try {
         const { url, path } = await uploadImage(`site/galerie/${slugify(target)}`, await compressImage(files[i], 1600, 0.8));
-        const { data, error } = await sb.from("photos").insert({ album: target, url, path, date }).select().single();
+        const row = { album: target, url, path, date };
+        if (ready) { row.ordre = nextPos++; if (albumOrder !== null && albumOrder !== undefined) row.album_ordre = albumOrder; }
+        const { data, error } = await sb.from("photos").insert(row).select().single();
         if (error) throw error;
         added.push(data);
       } catch (err) { fails++; console.warn(err); }
@@ -4628,8 +4663,9 @@ function AdminGallery({ photos, setPhotos, notify }) {
     setProgress(null);
     setPhotos((list) => [...added, ...list]);
     notify(fails ? `${added.length} photo(s) ajoutée(s), ${fails} échec(s).` : `${added.length} photo(s) ajoutée(s) à « ${target} ».`, fails ? "error" : "success");
-    if (album === "__new") { setAlbum(target); setNewAlbum(""); }
+    if (albumSel === "__new") { setAlbum(target); setNewAlbum(""); }
   };
+
   const removePhotos = async (list, msg) => {
     const paths = list.map((p) => p.path).filter(Boolean);
     const { error } = await sb.from("photos").delete().in("id", list.map((p) => p.id));
@@ -4646,17 +4682,116 @@ function AdminGallery({ photos, setPhotos, notify }) {
     setPhotos((all) => all.map((x) => (x.id === p.id ? { ...x, legende } : x)));
   };
 
+  // Applique une modification : l'écran change tout de suite, et revient en arrière si la base refuse.
+  const apply = async (queries, local) => {
+    const snapshot = photos;
+    setPhotos(local);
+    setBusy(true);
+    const res = await Promise.all(queries);
+    setBusy(false);
+    const err = res.find((r) => r.error);
+    if (err) { setPhotos(snapshot); notify("Modification impossible : " + err.error.message, "error"); return false; }
+    return true;
+  };
+
+  // ----- Albums -----
+  const moveAlbum = async (i, dir) => {
+    const j = i + dir;
+    if (j < 0 || j >= albums.length) return;
+    const order = albums.map((a) => a.nom);
+    [order[i], order[j]] = [order[j], order[i]];
+    const pos = Object.fromEntries(order.map((n, k) => [n, k]));
+    await apply(
+      order.map((n, k) => sb.from("photos").update({ album_ordre: k }).eq("album", n)),
+      (all) => all.map((p) => ({ ...p, album_ordre: pos[p.album] }))
+    );
+  };
+  const renameAlbum = async () => {
+    const from = renaming.from; const to = renaming.value.trim();
+    setRenaming(null);
+    if (!to || to === from) return;
+    if (albumNames.includes(to)) return notify("Un album porte déjà ce nom.", "error");
+    const ok = await apply(
+      [sb.from("photos").update({ album: to }).eq("album", from)],
+      (all) => all.map((p) => (p.album === from ? { ...p, album: to } : p))
+    );
+    if (ok) { if (albumSel === from) setAlbum(to); notify(`Album renommé « ${to} ».`); }
+  };
+
+  // ----- Photos d'un album -----
+  const reorderPhotos = async (a, orderedIds) => {
+    const pos = Object.fromEntries(orderedIds.map((id, k) => [id, k]));
+    const changed = a.photos.filter((p) => p.ordre !== pos[p.id]);
+    if (!changed.length) return;
+    await apply(
+      changed.map((p) => sb.from("photos").update({ ordre: pos[p.id] }).eq("id", p.id)),
+      (all) => all.map((p) => (p.id in pos ? { ...p, ordre: pos[p.id] } : p))
+    );
+  };
+  const movePhoto = (a, i, dir) => {
+    const j = i + dir;
+    if (j < 0 || j >= a.photos.length) return;
+    const ids = a.photos.map((p) => p.id);
+    [ids[i], ids[j]] = [ids[j], ids[i]];
+    reorderPhotos(a, ids);
+  };
+  const dropPhoto = (a, overId) => {
+    const from = dragId; setDragId(null);
+    if (!from || from === overId) return;
+    const ids = a.photos.map((p) => p.id);
+    if (!ids.includes(from)) return; // on ne glisse pas d'un album à l'autre (utiliser « Déplacer vers »)
+    ids.splice(ids.indexOf(from), 1);
+    ids.splice(ids.indexOf(overId), 0, from);
+    reorderPhotos(a, ids);
+  };
+  const setCover = async (a, p) => {
+    if (a.cover && a.cover.id === p.id) return;
+    const ok = await apply(
+      [sb.from("photos").update({ couverture: false }).eq("album", a.nom).neq("id", p.id), sb.from("photos").update({ couverture: true }).eq("id", p.id)],
+      (all) => all.map((x) => (x.album === a.nom ? { ...x, couverture: x.id === p.id } : x))
+    );
+    if (ok) notify("Miniature de l'album mise à jour.");
+  };
+  const moveToAlbum = async (p, value) => {
+    let to = value;
+    if (value === "__new") {
+      to = (window.prompt("Nom du nouvel album :") || "").trim();
+      if (!to) return;
+    }
+    if (to === p.album) return;
+    const dest = albums.find((a) => a.nom === to);
+    const patch = dest
+      ? { album: to, ordre: Math.max(-1, ...dest.photos.map((x) => (Number.isFinite(x.ordre) ? x.ordre : -1))) + 1, couverture: false, date: dest.date, album_ordre: dest.ordre }
+      : { album: to, ordre: 0, couverture: false, album_ordre: firstAlbumOrder() };
+    const ok = await apply(
+      [sb.from("photos").update(patch).eq("id", p.id)],
+      (all) => all.map((x) => (x.id === p.id ? { ...x, ...patch } : x))
+    );
+    if (ok) notify(`Photo déplacée vers « ${to} ».`);
+  };
+
+  const iconBtn = "w-8 h-8 rounded-lg bg-white bg-opacity-90 flex items-center justify-center shadow disabled:opacity-40";
+
   return (
     <div className="space-y-6">
+      {!ready && (
+        <div className="rounded-2xl bg-amber-50 border border-amber-200 p-5 text-sm text-amber-900 space-y-3">
+          <p className="font-bold">Une dernière étape pour organiser les albums</p>
+          <p>Pour pouvoir ordonner les albums et les photos et choisir la miniature de chaque album, lancez ce script une seule fois dans Supabase (menu « SQL Editor »), puis rechargez le site. En attendant, l'ajout, les légendes et la suppression fonctionnent comme avant.</p>
+          <pre className="bg-white border border-amber-200 rounded-xl p-3 text-xs overflow-x-auto whitespace-pre">{GALLERY_SQL}</pre>
+          <button onClick={() => { try { navigator.clipboard.writeText(GALLERY_SQL); notify("Script copié."); } catch (e) { /* copie impossible */ } }} className="px-4 py-2 rounded-xl bg-amber-600 text-white font-semibold hover:bg-amber-700">Copier le script</button>
+        </div>
+      )}
+
       <Panel title="Ajouter des photos" Icon={Camera}>
         <div className="grid sm:grid-cols-3 gap-3">
           <label className="block"><span className="text-xs font-semibold text-slate-600">Album</span>
-            <select value={album} onChange={(e) => setAlbum(e.target.value)} className={inputCls}>
+            <select value={albumSel} onChange={(e) => setAlbum(e.target.value)} className={inputCls}>
               {albumNames.map((a) => <option key={a} value={a}>{a}</option>)}
               <option value="__new">+ Nouvel album…</option>
             </select>
           </label>
-          {album === "__new" && <label className="block"><span className="text-xs font-semibold text-slate-600">Nom du nouvel album</span><input value={newAlbum} onChange={(e) => setNewAlbum(e.target.value)} placeholder="ex. Journée de l'Ingénieur 2026" className={inputCls} /></label>}
+          {albumSel === "__new" && <label className="block"><span className="text-xs font-semibold text-slate-600">Nom du nouvel album</span><input value={newAlbum} onChange={(e) => setNewAlbum(e.target.value)} placeholder="ex. Journée de l'Ingénieur 2026" className={inputCls} /></label>}
           <label className="block"><span className="text-xs font-semibold text-slate-600">Date de l'événement</span><input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={inputCls} /></label>
         </div>
         <label className={`mt-5 block border-2 border-dashed rounded-3xl p-8 text-center transition ${progress ? "border-slate-200 bg-slate-50 cursor-wait" : "cursor-pointer border-slate-300 hover:border-orange-500 hover:bg-orange-50"}`}>
@@ -4666,21 +4801,72 @@ function AdminGallery({ photos, setPhotos, notify }) {
           <input type="file" accept="image/*" multiple onChange={onFiles} disabled={!!progress} className="hidden" />
         </label>
       </Panel>
-      {albumNames.map((a) => {
-        const list = photos.filter((p) => p.album === a);
+
+      {ready && albums.length > 0 && (
+        <div className="rounded-2xl bg-orange-50 border border-orange-200 p-4 text-sm text-orange-900 flex items-start gap-3">
+          <Info size={18} className="flex-shrink-0 mt-0.5" />
+          <p>Les albums apparaissent dans la médiathèque dans l'ordre ci-dessous (flèches ↑ ↓). Dans un album, l'étoile choisit la <strong>miniature</strong> affichée dans la médiathèque ; les flèches ← → ou le glisser-déposer changent l'ordre des photos ; « Déplacer vers » envoie une photo dans un autre album.</p>
+        </div>
+      )}
+
+      {albums.map((a, ai) => {
+        const list = a.photos;
+        const isRenaming = renaming && renaming.from === a.nom;
         return (
-          <Panel key={a} title={`${a} (${list.length})`} Icon={FolderOpen}
-            action={<ConfirmButton onConfirm={() => removePhotos(list, `Album « ${a} » supprimé.`)} confirmLabel="Tout supprimer ?" className="px-3 py-1.5 rounded-lg text-xs font-semibold text-rose-600 hover:bg-rose-50">Supprimer l'album</ConfirmButton>}>
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
-              {list.map((p) => (
-                <div key={p.id} className="space-y-1.5">
-                  <div className="relative aspect-square rounded-xl overflow-hidden bg-slate-100">
-                    <img src={p.url} alt={p.legende} loading="lazy" className="w-full h-full object-cover" />
-                    <div className="absolute top-1.5 right-1.5"><ConfirmButton onConfirm={() => removePhotos([p], "Photo supprimée.")} confirmLabel="Suppr. ?" ariaLabel="Supprimer la photo" className="w-8 h-8 rounded-lg bg-white bg-opacity-90 text-rose-600 flex items-center justify-center shadow"><Trash2 size={15} /></ConfirmButton></div>
-                  </div>
-                  <input defaultValue={p.legende} onBlur={(e) => saveLegende(p, e.target.value.trim())} placeholder="Légende…" className="w-full px-2 py-1.5 rounded-lg border border-slate-200 text-xs focus:outline-none focus:ring-2 focus:ring-orange-500" />
+          <Panel key={a.nom} title={`${a.nom} (${list.length})`} Icon={FolderOpen}
+            action={
+              <div className="flex flex-wrap items-center justify-end gap-1">
+                {ready && (
+                  <>
+                    <button disabled={busy || ai === 0} onClick={() => moveAlbum(ai, -1)} aria-label="Monter l'album" title="Monter l'album" className="w-9 h-9 rounded-lg text-slate-600 hover:bg-slate-100 flex items-center justify-center disabled:opacity-30"><ArrowUp size={16} /></button>
+                    <button disabled={busy || ai === albums.length - 1} onClick={() => moveAlbum(ai, 1)} aria-label="Descendre l'album" title="Descendre l'album" className="w-9 h-9 rounded-lg text-slate-600 hover:bg-slate-100 flex items-center justify-center disabled:opacity-30"><ArrowDown size={16} /></button>
+                  </>
+                )}
+                <button onClick={() => setRenaming({ from: a.nom, value: a.nom })} aria-label="Renommer l'album" title="Renommer l'album" className="w-9 h-9 rounded-lg text-slate-600 hover:bg-slate-100 flex items-center justify-center"><Pencil size={16} /></button>
+                <ConfirmButton onConfirm={() => removePhotos(list, `Album « ${a.nom} » supprimé.`)} confirmLabel="Tout supprimer ?" className="px-3 py-1.5 rounded-lg text-xs font-semibold text-rose-600 hover:bg-rose-50">Supprimer l'album</ConfirmButton>
+              </div>
+            }>
+            {isRenaming && (
+              <div className="mb-5 flex flex-col sm:flex-row gap-2">
+                <input autoFocus value={renaming.value} onChange={(e) => setRenaming({ from: a.nom, value: e.target.value })} onKeyDown={(e) => { if (e.key === "Enter") renameAlbum(); if (e.key === "Escape") setRenaming(null); }} placeholder="Nom de l'album" className={inputCls + " mt-0 flex-1"} />
+                <div className="flex gap-2">
+                  <button onClick={renameAlbum} className="px-4 py-2 rounded-xl bg-orange-600 text-white text-sm font-semibold hover:bg-orange-700">Enregistrer</button>
+                  <button onClick={() => setRenaming(null)} className="px-4 py-2 rounded-xl bg-white border border-slate-300 text-sm">Annuler</button>
                 </div>
-              ))}
+              </div>
+            )}
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+              {list.map((p, i) => {
+                const isCover = a.cover && a.cover.id === p.id;
+                return (
+                  <div key={p.id} className={`space-y-1.5 rounded-xl ${dragId === p.id ? "opacity-40" : ""}`}
+                    draggable={ready}
+                    onDragStart={() => setDragId(p.id)} onDragEnd={() => setDragId(null)}
+                    onDragOver={(e) => { if (dragId) e.preventDefault(); }}
+                    onDrop={(e) => { e.preventDefault(); dropPhoto(a, p.id); }}>
+                    <div className={`relative aspect-square rounded-xl overflow-hidden bg-slate-100 ${isCover ? "ring-4 ring-orange-500" : ""}`}>
+                      <img src={p.url} alt={p.legende} loading="lazy" draggable={false} className="w-full h-full object-cover" />
+                      {isCover && <span className="absolute bottom-1.5 left-1.5 px-2 py-0.5 rounded-md bg-orange-600 text-white text-xs font-semibold">Miniature</span>}
+                      {ready && <button disabled={busy} onClick={() => setCover(a, p)} aria-label="Choisir comme miniature de l'album" title={isCover ? "Miniature de l'album" : "Choisir comme miniature de l'album"} className={iconBtn + " absolute top-1.5 left-1.5 " + (isCover ? "text-orange-600" : "text-slate-500")}><Star size={15} /></button>}
+                      <div className="absolute top-1.5 right-1.5"><ConfirmButton onConfirm={() => removePhotos([p], "Photo supprimée.")} confirmLabel="Suppr. ?" ariaLabel="Supprimer la photo" className="w-8 h-8 rounded-lg bg-white bg-opacity-90 text-rose-600 flex items-center justify-center shadow"><Trash2 size={15} /></ConfirmButton></div>
+                      {ready && (
+                        <div className="absolute bottom-1.5 right-1.5 flex gap-1">
+                          <button disabled={busy || i === 0} onClick={() => movePhoto(a, i, -1)} aria-label="Avancer la photo" className={iconBtn + " text-slate-700"}><ChevronLeft size={16} /></button>
+                          <button disabled={busy || i === list.length - 1} onClick={() => movePhoto(a, i, 1)} aria-label="Reculer la photo" className={iconBtn + " text-slate-700"}><ChevronRight size={16} /></button>
+                        </div>
+                      )}
+                    </div>
+                    <input defaultValue={p.legende} onBlur={(e) => saveLegende(p, e.target.value.trim())} placeholder="Légende…" className="w-full px-2 py-1.5 rounded-lg border border-slate-200 text-xs focus:outline-none focus:ring-2 focus:ring-orange-500" />
+                    {ready && (
+                      <select value="" disabled={busy} onChange={(e) => moveToAlbum(p, e.target.value)} className="w-full px-2 py-1.5 rounded-lg border border-slate-200 text-xs bg-white text-slate-600 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                        <option value="">Déplacer vers…</option>
+                        {albumNames.filter((n) => n !== a.nom).map((n) => <option key={n} value={n}>{n}</option>)}
+                        <option value="__new">+ Nouvel album…</option>
+                      </select>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </Panel>
         );
