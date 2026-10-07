@@ -1226,12 +1226,15 @@ function App() {
 
   const handleRegister = async (r) => {
     quietUntil.current = Date.now() + 10000;
-    const { data: free, error: e1 } = await sb.rpc("matricule_disponible", { m: r.matricule });
-    if (e1) return "Vérification du matricule impossible : " + e1.message;
-    if (free === false) return "Ce matricule possède déjà un compte.";
+    // Matricule facultatif pour les anciens : on ne vérifie la disponibilité que s'il est renseigné.
+    if (r.matricule) {
+      const { data: free, error: e1 } = await sb.rpc("matricule_disponible", { m: r.matricule });
+      if (e1) return "Vérification du matricule impossible : " + e1.message;
+      if (free === false) return "Ce matricule possède déjà un compte.";
+    }
     const { data, error } = await sb.auth.signUp({
       email: r.email, password: r.password,
-      options: { emailRedirectTo: SITE_URL(), data: { prenoms: r.prenoms, nom: r.nom, matricule: r.matricule, filiere: r.filiere, promotion: r.promotion, type: r.type,
+      options: { emailRedirectTo: SITE_URL(), data: { prenoms: r.prenoms, nom: r.nom, matricule: r.matricule || null, filiere: r.filiere, promotion: r.promotion, type: r.type,
         ...(r.type === "ancien" ? { cge_ancien: r.cge_ancien, postes_cge: r.cge_ancien === "oui" ? nettoyerPostes(r.postes_cge) : [] } : {}) } },
     });
     if (error) return authMessage(error);
@@ -3689,10 +3692,18 @@ function LoginEmailCard({ notify }) {
     if (!EMAIL_RE.test(e)) return setErr("Adresse email invalide.");
     if (e.toLowerCase() === current.toLowerCase()) return setErr("C'est déjà l'email de votre compte.");
     setBusy(true); setErr("");
-    const { error } = await sb.auth.updateUser({ email: e }, { emailRedirectTo: SITE_URL() });
+    const { data: res, error } = await sb.auth.updateUser({ email: e }, { emailRedirectTo: SITE_URL() });
     setBusy(false);
     if (error) return setErr(authMessage(error));
     setVal("");
+    const u = res && res.user;
+    if (u && !u.new_email && (u.email || "").toLowerCase() === e.toLowerCase()) {
+      // Pas de confirmation exigée par le projet : le changement est déjà appliqué, aucun email n'est envoyé.
+      setCurrent(u.email); setPending("");
+      try { await sb.from("profiles").update({ email: u.email }).eq("id", u.id); } catch (x) { /* la fiche sera resynchronisée au prochain chargement */ }
+      notify("Email de connexion modifié. Connectez-vous désormais avec " + u.email + ".");
+      return;
+    }
     await loadUser();
     notify("Lien de confirmation envoyé. Ouvrez-le pour valider le nouvel email.");
   };
@@ -3951,8 +3962,10 @@ function LoginModal({ onClose, onLogin, onRegister, onForgot }) {
     promotion: /^\d{1,3}$/,
     password: /^.{8,}$/,
   };
-  const regValid = (k, value = reg[k]) => {
+  const regValid = (k, value = reg[k], type = reg.type) => {
     const v = String(value ?? "").trim();
+    // Les anciens peuvent s'inscrire sans matricule ; s'ils en saisissent un, il doit être au bon format.
+    if (k === "matricule" && type === "ancien" && !v) return true;
     if (["prenoms", "nom", "matricule", "email", "filiere", "promotion", "password", "confirm"].includes(k) && !v) return false;
     if (REG_RULES[k] && !REG_RULES[k].test(v)) return false;
     if (k === "confirm" && v !== reg.password) return false;
@@ -3960,7 +3973,7 @@ function LoginModal({ onClose, onLogin, onRegister, onForgot }) {
   };
   const regAllValid = (r = reg) => {
     const required = ["prenoms", "nom", "matricule", "email", "filiere", "promotion", "password", "confirm"];
-    if (required.some((k) => !regValid(k, r[k]))) return false;
+    if (required.some((k) => !regValid(k, r[k], r.type))) return false;
     if (r.type === "ancien" && !r.cge_ancien) return false;
     if (r.type === "ancien" && r.cge_ancien === "oui" && erreurPostes(r.postes_cge)) return false;
     return true;
@@ -4052,7 +4065,7 @@ function LoginModal({ onClose, onLogin, onRegister, onForgot }) {
             ))}
           </div>
           <div className="grid grid-cols-2 gap-3">{regField("Prénoms", "prenoms", "text", "ex. Kouamé Jean-Marc")}{regField("Nom", "nom", "text", "ex. KOFFI")}</div>
-          {regField(reg.type === "ancien" ? "Matricule (lors de votre scolarité)" : "Matricule", "matricule", "text", "ex. 2024-1234")}
+          {regField(reg.type === "ancien" ? "Matricule (facultatif — celui de votre scolarité)" : "Matricule", "matricule", "text", "ex. 2024-1234")}
           {regField("Email (servira à vous connecter)", "email", "email", "ex. kouamejean@gmail.com")}
           <div className="grid grid-cols-2 gap-3">
             <label className="block"><span className="text-xs font-semibold text-slate-600">Filière</span>
