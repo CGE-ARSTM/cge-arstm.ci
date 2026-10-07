@@ -330,6 +330,9 @@ const TEXT_GROUPS = [
     ["adhesion.bandeau", "Bandeau affiché pendant la campagne (accueil, actualités, événements)", "Les adhésions à la CGE section ARSTM sont ouvertes !"],
   ] },
 ];
+TEXT_GROUPS.push({ titre: "Google Drive (envoi des documents)", champs: [
+  ["drive.client_id", "ID client Google (OAuth). Une fois renseigné, un bouton « Envoyer vers Google Drive » apparaît quand on ajoute un document de type « Lien »", ""],
+] });
 const TEXT_DEFAULTS = Object.fromEntries(TEXT_GROUPS.flatMap((g) => g.champs.map(([k, , d]) => [k, d])));
 // Texte en vigueur : celui de l'administrateur s'il existe, sinon le texte d'origine.
 const tx = (k, fallback = "") => { const v = TEXTES[k]; return typeof v === "string" && v.trim() ? v : TEXT_DEFAULTS[k] ?? fallback; };
@@ -4235,6 +4238,7 @@ const ADMIN_SECTIONS = {
       { k: "type", label: "Type", type: "select", opts: ["fichier", "lien", "video"], labels: { fichier: "Fichier à télécharger", lien: "Lien vers un site", video: "Vidéo (YouTube, Facebook…)" } },
       { k: "categorie", label: "Catégorie", type: "select", opts: DOC_CATEGORIES, showIf: (f) => (f.type || "fichier") !== "video" },
       { k: "fichier", label: "Fichier (10 Mo maximum)", type: "file", showIf: (f) => (f.type || "fichier") === "fichier" },
+      { k: "drive", label: "Google Drive", type: "drive", showIf: (f) => (f.type || "fichier") === "lien" },
       { k: "lien", label: "Adresse", type: "url", placeholder: "https://...", showIf: (f) => (f.type || "fichier") !== "fichier" },
       { k: "description", label: "Description", type: "textarea", optional: true },
       { k: "members_only", label: "Réservé aux membres", type: "checkbox" },
@@ -4313,6 +4317,147 @@ function ImageField({ label, value, onChange, folder, shape, notify }) {
 }
 
 // Champ « fichier » des documents : envoi immédiat dans l'espace privé « documents ».
+// ---------------------------------------------------------------------
+// Envoi d'un fichier vers le Google Drive de la CGE (compte Google de l'administrateur connecté).
+// Portée « drive.file » : le site ne voit que les fichiers qu'il a lui-même envoyés, dans le dossier « CGE ARSTM - Documents ».
+// Le fichier est partagé « toute personne disposant du lien » et son lien est placé dans le champ Adresse.
+// ---------------------------------------------------------------------
+const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file";
+const DRIVE_FOLDER = "CGE ARSTM - Documents";
+const DRIVE_MAX = 100 * 1048576;
+const driveClientId = () => String(tx("drive.client_id") || (typeof CFG !== "undefined" && CFG && CFG.GOOGLE_CLIENT_ID) || "").trim();
+let driveToken = { value: "", exp: 0 };
+let driveFolderId = "";
+let gisPromise = null;
+const loadGis = () => {
+  if (window.google && window.google.accounts && window.google.accounts.oauth2) return Promise.resolve();
+  if (!gisPromise) gisPromise = new Promise((res, rej) => {
+    const sc = document.createElement("script");
+    sc.src = "https://accounts.google.com/gsi/client"; sc.async = true;
+    sc.onload = () => res();
+    sc.onerror = () => { gisPromise = null; rej(new Error("Impossible de charger Google. Vérifiez la connexion internet.")); };
+    document.head.appendChild(sc);
+  });
+  return gisPromise;
+};
+const driveHasToken = () => !!driveToken.value && Date.now() < driveToken.exp - 60000;
+// À appeler directement depuis un clic (sinon le navigateur bloque la fenêtre Google).
+const driveSignIn = (clientId) => new Promise((res, rej) => {
+  if (!(window.google && window.google.accounts && window.google.accounts.oauth2)) return rej(new Error("Google n'est pas encore chargé, réessayez dans un instant."));
+  const client = window.google.accounts.oauth2.initTokenClient({
+    client_id: clientId, scope: DRIVE_SCOPE,
+    callback: (r) => {
+      if (r.error) return rej(new Error(r.error_description || r.error));
+      driveToken = { value: r.access_token, exp: Date.now() + (Number(r.expires_in) || 3600) * 1000 };
+      res(r.access_token);
+    },
+    error_callback: (e) => rej(new Error(e && e.type === "popup_closed" ? "Connexion Google annulée." : "Connexion Google impossible (fenêtre bloquée ?).")),
+  });
+  client.requestAccessToken();
+});
+const driveApi = async (url, opts = {}) => {
+  const r = await fetch(url, { ...opts, headers: { Authorization: "Bearer " + driveToken.value, ...(opts.headers || {}) } });
+  if (r.status === 401) { driveToken = { value: "", exp: 0 }; throw new Error("Session Google expirée : reconnectez-vous."); }
+  if (!r.ok) {
+    let msg = ""; try { const j = await r.json(); msg = (j.error && (j.error.message || j.error.status)) || ""; } catch (e) { /* pas de détail */ }
+    throw new Error("Google Drive a refusé la demande" + (msg ? " : " + msg : " (code " + r.status + ")."));
+  }
+  return r;
+};
+const driveEnsureFolder = async () => {
+  if (driveFolderId) return driveFolderId;
+  const q = encodeURIComponent(`name='${DRIVE_FOLDER}' and mimeType='application/vnd.google-apps.folder' and trashed=false`);
+  const found = await (await driveApi(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id)&pageSize=1`)).json();
+  if (found.files && found.files[0]) return (driveFolderId = found.files[0].id);
+  const made = await (await driveApi("https://www.googleapis.com/drive/v3/files?fields=id", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: DRIVE_FOLDER, mimeType: "application/vnd.google-apps.folder" }),
+  })).json();
+  return (driveFolderId = made.id);
+};
+const driveUpload = async (file, onProgress) => {
+  const folder = await driveEnsureFolder();
+  const start = await driveApi("https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id,webViewLink", {
+    method: "POST",
+    headers: { "Content-Type": "application/json; charset=UTF-8", "X-Upload-Content-Type": file.type || "application/octet-stream", "X-Upload-Content-Length": String(file.size) },
+    body: JSON.stringify({ name: file.name, parents: [folder] }),
+  });
+  const location = start.headers.get("Location");
+  if (!location) throw new Error("Google Drive n'a pas ouvert l'envoi. Réessayez.");
+  const meta = await new Promise((res, rej) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("PUT", location);
+    xhr.setRequestHeader("Content-Type", file.type || "application/octet-stream");
+    xhr.upload.onprogress = (e) => { if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100)); };
+    xhr.onload = () => { if (xhr.status >= 200 && xhr.status < 300) { try { res(JSON.parse(xhr.responseText)); } catch (e) { rej(new Error("Réponse inattendue de Google Drive.")); } } else rej(new Error("Envoi vers Google Drive interrompu (code " + xhr.status + ").")); };
+    xhr.onerror = () => rej(new Error("Envoi vers Google Drive impossible : connexion perdue ?"));
+    xhr.send(file);
+  });
+  // Partage « toute personne disposant du lien », en lecture seule.
+  await driveApi(`https://www.googleapis.com/drive/v3/files/${meta.id}/permissions`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ role: "reader", type: "anyone" }),
+  });
+  return meta.webViewLink || `https://drive.google.com/file/d/${meta.id}/view`;
+};
+
+function DriveUploadField({ label, setForm, notify }) {
+  const clientId = driveClientId();
+  const [ready, setReady] = useState(driveHasToken());
+  const [busy, setBusy] = useState(false);
+  const [pct, setPct] = useState(0);
+  const [done, setDone] = useState("");
+  useEffect(() => { if (clientId) loadGis().catch(() => {}); }, [clientId]);
+  const connect = async () => {
+    setBusy(true);
+    try { await loadGis(); await driveSignIn(clientId); setReady(true); }
+    catch (e) { notify(e.message, "error"); }
+    finally { setBusy(false); }
+  };
+  const onFile = async (e) => {
+    const f = e.target.files && e.target.files[0]; e.target.value = "";
+    if (!f) return;
+    if (f.size > DRIVE_MAX) return notify(`Fichier trop lourd (${fileSize(DRIVE_MAX)} maximum).`, "error");
+    if (!driveHasToken()) { setReady(false); return notify("Session Google expirée : reconnectez-vous.", "error"); }
+    setBusy(true); setPct(0); setDone("");
+    try {
+      const link = await driveUpload(f, setPct);
+      setForm((prev) => ({ ...prev, lien: link, titre: prev.titre || f.name.replace(/\.[^.]+$/, "") }));
+      setDone(f.name);
+      notify("Fichier envoyé sur Google Drive. Le lien est rempli : pensez à enregistrer.");
+    } catch (err) {
+      notify(err.message, "error");
+      if (!driveHasToken()) setReady(false);
+    } finally { setBusy(false); }
+  };
+  if (!clientId) {
+    return (
+      <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-3 text-xs text-slate-600">
+        <p className="font-semibold text-slate-700 flex items-center gap-1.5"><Upload size={14} /> Envoi direct vers Google Drive : pas encore activé</p>
+        <p className="mt-1">Renseignez l'ID client Google dans Textes, bureau & images → Textes des pages → « Google Drive ». En attendant, collez ci-dessous le lien d'un fichier déjà placé sur Drive.</p>
+      </div>
+    );
+  }
+  return (
+    <div className="block">
+      {label}
+      <div className="mt-1 flex flex-wrap items-center gap-3 p-3 rounded-xl border border-dashed border-slate-300">
+        <span className="text-sm min-w-0 flex-1 text-slate-500">
+          {busy && ready ? `Envoi vers Google Drive… ${pct}%` : done ? <span className="font-semibold text-emerald-700 break-words">Envoyé : {done}</span> : ready ? "Choisissez un fichier : il sera placé dans le Drive de la CGE." : "Connectez-vous avec le compte Google de la CGE."}
+        </span>
+        {ready ? (
+          <label className={`cursor-pointer px-3 py-2 rounded-xl text-xs font-semibold flex items-center gap-1 ${busy ? "bg-slate-200 text-slate-500" : "bg-orange-600 text-white hover:bg-orange-700"}`}>
+            <Upload size={14} /> {busy ? "Envoi..." : done ? "Remplacer" : "Choisir un fichier"}
+            <input type="file" onChange={onFile} disabled={busy} className="hidden" />
+          </label>
+        ) : (
+          <button type="button" onClick={connect} disabled={busy} className="px-3 py-2 rounded-xl text-xs font-semibold bg-slate-900 text-white hover:bg-slate-800 disabled:opacity-60">{busy ? "Connexion..." : "Se connecter à Google Drive"}</button>
+        )}
+      </div>
+      {busy && ready && <div className="mt-2 h-1.5 rounded-full bg-slate-100 overflow-hidden"><div className="h-full bg-orange-500 transition-all" style={{ width: pct + "%" }} /></div>}
+    </div>
+  );
+}
+
 function FileField({ label, form, setForm, notify }) {
   const [busy, setBusy] = useState(false);
   const onFile = async (e) => {
@@ -6574,7 +6719,7 @@ function AdminPanel({ news, setNews, events, setEvents, jobs, setJobs, alumni, s
   const save = async () => {
     if (saving) return;
     const fields = cfg.fields.filter(visibleField);
-    const missing = fields.find((f) => !f.optional && !["checkbox", "select", "image", "file"].includes(f.type) && !String(form[f.k] ?? "").trim());
+    const missing = fields.find((f) => !f.optional && !["checkbox", "select", "image", "file", "drive"].includes(f.type) && !String(form[f.k] ?? "").trim());
     if (missing) return notify(`Le champ « ${missing.label} » est obligatoire.`, "error");
     const badUrl = fields.find((f) => f.type === "url" && form[f.k] && !/^https?:\/\//i.test(String(form[f.k]).trim()));
     if (badUrl) return notify(`Le champ « ${badUrl.label} » doit commencer par https://`, "error");
@@ -6684,6 +6829,7 @@ function AdminPanel({ news, setNews, events, setEvents, jobs, setJobs, alumni, s
     const lab = <span className="text-xs font-semibold text-slate-600">{f.label}{f.optional && <span className="font-normal text-slate-400"> (facultatif)</span>}</span>;
     if (f.type === "image") return <ImageField key={f.k} label={lab} value={val} folder={f.folder} shape={f.shape} notify={notify} onChange={(url) => setForm((prev) => ({ ...prev, [f.k]: url }))} />;
     if (f.type === "file") return <FileField key={f.k} label={lab} form={form} setForm={setForm} notify={notify} />;
+    if (f.type === "drive") return <DriveUploadField key={f.k} label={lab} setForm={setForm} notify={notify} />;
     const onChange = (e) => setForm({ ...form, [f.k]: f.type === "checkbox" ? e.target.checked : e.target.value });
     if (f.type === "checkbox") return <label key={f.k} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={!!val} onChange={onChange} className="w-4 h-4 accent-orange-600" /> {f.label}</label>;
     if (f.type === "select") return <label key={f.k} className="block">{lab}<select value={val ?? f.opts[0]} onChange={onChange} className={inputCls}>{f.opts.map((o) => <option key={o} value={o}>{(f.labels && f.labels[o]) || o || "— Non précisé —"}</option>)}</select></label>;
@@ -6694,7 +6840,7 @@ function AdminPanel({ news, setNews, events, setEvents, jobs, setJobs, alumni, s
   const hints = {
     temoignages: "Les anciens inscrits peuvent aussi proposer leur témoignage depuis leur espace : il apparaît alors ici, à valider.",
     alumni: "Pour les anciens qui n'ont pas (encore) de compte. Ceux qui s'inscrivent sur le site apparaissent automatiquement dans l'annuaire.",
-    documents: "Les fichiers sont privés : chaque téléchargement passe par un lien temporaire. Les documents « réservés aux membres » sont invisibles pour les visiteurs.",
+    documents: "Pour un gros fichier, choisissez le type « Lien vers un site » : le bouton Google Drive l'envoie dans le Drive de la CGE. Les fichiers envoyés directement ici sont privés : chaque téléchargement passe par un lien temporaire. Les documents « réservés aux membres » sont invisibles pour les visiteurs.",
     partenaires: "Les partenaires « officiels » sont mis en avant sur l'accueil ; les autres apparaissent en logos et sur la page Partenaires.",
   };
 
