@@ -1201,11 +1201,10 @@ function App() {
   // Les non-membres (visiteurs et élèves non adhérents) voient l'aperçu public des opportunités.
   const fullAccess = !!me && (!!me.membre_cge || me.type === "ancien" || isAdmin || perms.length > 0);
   const homeOpps = fullAccess ? [...openJobs].slice(0, 4) : apercu;
+  // Bandeau d'accueil : uniquement les années d'existence (calculées automatiquement).
   const homeStats = [
-    [fullAccess ? openJobs.length : stats.offres, "", "Opportunités ouvertes"],
-    [stats.membres, "", "Membres inscrits"],
-    [stats.anciens, "", "Anciens dans le réseau"],
-    [new Date().getFullYear() - ANNEE_CREATION, "", `Ans d'existence (depuis ${ANNEE_CREATION})`],
+    [new Date().getFullYear() - ANNEE_CREATION, "", "Ans d'existence"],
+    [ANNEE_CREATION, "", "Année de création"],
   ];
 
   // ----- Connexion, inscription, mot de passe -----
@@ -2111,7 +2110,7 @@ function Home({ go, user, openLogin, visibleNews, upcoming, nextEvent, homeOpps,
       </div>
 
       <section className="max-w-6xl mx-auto px-4 relative z-10 mt-12">
-        <div className="bg-white rounded-3xl shadow-xl p-8 grid grid-cols-2 md:grid-cols-4 gap-8">
+        <div className="bg-white rounded-3xl shadow-xl p-8 grid grid-cols-2 gap-8 max-w-xl mx-auto">
           {homeStats.map(([v, s, l]) => <Stat key={l} value={v} suffix={s} label={l} />)}
         </div>
       </section>
