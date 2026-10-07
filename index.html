@@ -6447,6 +6447,7 @@ function AdminPanel({ news, setNews, events, setEvents, jobs, setJobs, alumni, s
   const [editingId, setEditingId] = useState(null);
   const [saving, setSaving] = useState(false);
   const [viewing, setViewing] = useState(null);
+  const [openRegs, setOpenRegs] = useState(null); // événement dont on affiche la liste des inscrits
   const [mq, setMq] = useState("");
   const [mf, setMf] = useState("");
   const [mt, setMt] = useState("");
@@ -6808,11 +6809,11 @@ function AdminPanel({ news, setNews, events, setEvents, jobs, setJobs, alumni, s
                 const count = tab === "events" ? registrations.filter((r) => r.eventId === i.id).length : null;
                 const past = (tab === "events" && daysUntil(i.date) < 0) || (tab === "jobs" && isExpired(i));
                 return (
-                  <li key={i.id} className={`py-3 flex items-center justify-between gap-3 ${editingId === i.id ? "bg-orange-50 -mx-3 px-3 rounded-xl" : ""}`}>
+                  <li key={i.id} className={`py-3 flex flex-wrap items-center justify-between gap-3 ${editingId === i.id ? "bg-orange-50 -mx-3 px-3 rounded-xl" : ""}`}>
                     <div className="text-sm text-slate-700 min-w-0">
                       {tab === "jobs" && <span className="mr-2"><TypeBadge type={i.type} /></span>}
                       <span className={past ? "text-slate-400" : ""}>{cfg.show(i)}</span>
-                      {count !== null && <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-orange-100 text-orange-700 font-semibold whitespace-nowrap">{count} inscrit{count > 1 ? "s" : ""}</span>}
+                      {count !== null && <button type="button" onClick={() => setOpenRegs(openRegs === i.id ? null : i.id)} aria-expanded={openRegs === i.id} title="Voir qui est inscrit" className={`ml-2 text-xs px-2 py-0.5 rounded-full font-semibold whitespace-nowrap ${openRegs === i.id ? "bg-orange-600 text-white" : "bg-orange-100 text-orange-700 hover:bg-orange-200"}`}>{count} inscrit{count > 1 ? "s" : ""} {openRegs === i.id ? "▲" : "▼"}</button>}
                       {past && <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 font-semibold">{tab === "jobs" ? "clôturée" : "passé"}</span>}
                       {tab === "documents" && <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 font-semibold">{{ fichier: "fichier", lien: "lien", video: "vidéo" }[i.type] || i.type}</span>}
                       {tab === "documents" && i.members_only && <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-slate-900 text-white font-semibold">membres</span>}
@@ -6823,6 +6824,36 @@ function AdminPanel({ news, setNews, events, setEvents, jobs, setJobs, alumni, s
                       <button onClick={() => startEdit(i)} className="p-2 rounded-lg text-slate-600 hover:bg-slate-100 hover:text-orange-600" aria-label="Modifier" title="Modifier"><Pencil size={16} /></button>
                       <ConfirmButton onConfirm={() => remove(i)} confirmLabel="Supprimer ?" ariaLabel="Supprimer" className="p-2 rounded-lg text-rose-600 hover:bg-rose-50"><Trash2 size={16} /></ConfirmButton>
                     </div>
+                    {tab === "events" && openRegs === i.id && (() => {
+                      const rows = registrations.filter((r) => r.eventId === i.id).map((r) => {
+                        const m = members.find((x) => x.id === r.userId);
+                        const d = (m && m.data) || {};
+                        return { id: r.userId, name: m ? accountName(m) : (r.name || "Membre"), email: m?.email || "", tel: d.telephone || "", info: [m?.filiere, m?.promotion].filter(Boolean).join(" · ") };
+                      }).sort((a, b) => a.name.localeCompare(b.name, "fr"));
+                      const copy = () => {
+                        const txt = rows.map((x) => [x.name, x.email, x.tel].filter(Boolean).join(" - ")).join("\n");
+                        try { navigator.clipboard.writeText(txt).then(() => notify("Liste des inscrits copiée."), () => notify("Copie impossible.", "error")); } catch (e) { notify("Copie impossible.", "error"); }
+                      };
+                      return (
+                        <div className="basis-full w-full rounded-xl bg-orange-50 border border-orange-100 p-3">
+                          <div className="flex items-center justify-between gap-2 mb-2">
+                            <p className="text-sm font-bold text-slate-800">Inscrits ({rows.length})</p>
+                            {rows.length > 0 && <button type="button" onClick={copy} className="text-xs font-semibold px-2.5 py-1 rounded-lg bg-white border border-orange-200 text-orange-700 hover:bg-orange-100">Copier la liste</button>}
+                          </div>
+                          {rows.length === 0 ? <p className="text-sm text-slate-500">Personne ne s'est encore inscrit.</p> : (
+                            <ol className="space-y-1.5">
+                              {rows.map((x, n) => (
+                                <li key={x.id || n} className="text-sm text-slate-700 flex gap-2">
+                                  <span className="text-slate-400 w-5 text-right flex-shrink-0">{n + 1}.</span>
+                                  <span className="min-w-0 break-words"><span className="font-semibold text-slate-900">{x.name}</span>{x.info && <span className="text-slate-500"> · {x.info}</span>}
+                                    {(x.email || x.tel) && <span className="block text-xs text-slate-500">{[x.email, x.tel].filter(Boolean).join(" · ")}</span>}</span>
+                                </li>
+                              ))}
+                            </ol>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </li>
                 );
               })}
