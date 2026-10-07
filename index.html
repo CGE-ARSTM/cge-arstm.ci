@@ -3,7 +3,7 @@
 <head>
 <base href="/" />
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>CGE ARSTM — Conférence des Grandes Écoles</title>
 <meta name="description" content="Section ARSTM de la Conférence des Grandes Écoles de Côte d'Ivoire : actualités, événements, opportunités, réseau des anciens, mentorat, médiathèque et espace membre." />
 <meta name="theme-color" content="#ff8a00" />
@@ -1426,10 +1426,12 @@ function App() {
       dept: me && me.departement ? { nom: me.departement, poste: me.poste_cge || "" } : null } }}>
     <div className="min-h-screen bg-stone-50 text-slate-800 font-sans">
       {toast && (
-        <div className={`fixed top-4 left-4 right-4 sm:left-1/2 sm:right-auto sm:-translate-x-1/2 z-50 w-auto sm:w-max max-w-[calc(100vw-2rem)] sm:max-w-[520px] px-4 sm:px-5 py-3 rounded-xl shadow-2xl text-sm sm:text-base font-medium fade-up ${toast.type === "error" ? "bg-rose-600 text-white" : "bg-slate-900 text-white"}`}>
-          <div className="flex items-center justify-center gap-2 text-center break-words leading-snug">
-            {toast.type === "error" ? <X size={16} className="flex-shrink-0" /> : <CheckCircle2 size={16} className="text-orange-400 flex-shrink-0" />}
-            <span className="min-w-0 break-words">{toast.msg}</span>
+        <div className="fixed inset-x-0 z-50 flex justify-center px-4 pointer-events-none" style={{ top: "calc(env(safe-area-inset-top, 0px) + 0.75rem)" }}>
+          <div className={`fade-up pointer-events-auto w-auto max-w-full sm:max-w-[520px] px-4 sm:px-5 py-3 rounded-xl shadow-2xl text-sm sm:text-base font-medium ${toast.type === "error" ? "bg-rose-600 text-white" : "bg-slate-900 text-white"}`}>
+            <div className="flex items-center justify-center gap-2 text-center leading-snug">
+              {toast.type === "error" ? <X size={16} className="flex-shrink-0" /> : <CheckCircle2 size={16} className="text-orange-400 flex-shrink-0" />}
+              <span className="min-w-0 break-words">{toast.msg}</span>
+            </div>
           </div>
         </div>
       )}
