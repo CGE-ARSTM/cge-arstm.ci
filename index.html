@@ -2574,6 +2574,10 @@ function buildAlbums(photos) {
   return Object.values(map).map((a) => {
     a.photos.sort((x, y) => photoRank(x) - photoRank(y) || String(x.created_at).localeCompare(String(y.created_at)));
     a.cover = a.photos.find((p) => p.couverture) || a.photos[0];
+    // Miniature personnalisée (image importée ou prise dans un autre album) : elle passe avant l'étoile.
+    const custom = a.photos.find((p) => p.couverture_url);
+    a.coverCustom = custom ? custom.couverture_url : null;
+    a.coverUrl = a.coverCustom || (a.cover && a.cover.url);
     return a;
   }).sort((x, y) => (x.ordre === null ? 1e9 : x.ordre) - (y.ordre === null ? 1e9 : y.ordre) || String(y.date).localeCompare(String(x.date)));
 }
@@ -2614,7 +2618,7 @@ function MediaPage({ user, canSeeDocs, documents, photos, notify, openLogin, sin
               {albums.map((a) => (
                 <button key={a.nom} onClick={() => setAlbum(a.nom)} className="group text-left bg-white rounded-3xl overflow-hidden shadow-sm hover:shadow-2xl hover:-translate-y-1 transition duration-300">
                   <div className="relative aspect-video bg-slate-100 overflow-hidden">
-                    <img src={a.cover.url} alt={a.nom} loading="lazy" className="w-full h-full object-cover group-hover:scale-105 transition duration-500" />
+                    <img src={a.coverUrl} alt={a.nom} loading="lazy" className="w-full h-full object-cover group-hover:scale-105 transition duration-500" />
                     <span className="absolute bottom-3 right-3 px-2.5 py-1 rounded-lg bg-black bg-opacity-60 text-white text-xs font-semibold flex items-center gap-1"><Camera size={12} /> {a.photos.length}</span>
                     {a.photos.some((p) => newer(p.created_at, since)) && <NewBadge className="absolute top-3 left-3 shadow" />}
                   </div>
@@ -4618,7 +4622,9 @@ function ImagesManager({ notify }) {
 // (ordre, déplacement d'un album à l'autre, légendes), suppression.
 const GALLERY_SQL = `alter table public.photos add column if not exists ordre integer;
 alter table public.photos add column if not exists album_ordre integer;
-alter table public.photos add column if not exists couverture boolean not null default false;`;
+alter table public.photos add column if not exists couverture boolean not null default false;
+alter table public.photos add column if not exists couverture_url text;
+alter table public.photos add column if not exists couverture_path text;`;
 
 function AdminGallery({ photos, setPhotos, notify }) {
   const albums = buildAlbums(photos);
@@ -4634,6 +4640,11 @@ function AdminGallery({ photos, setPhotos, notify }) {
   const target = albumSel === "__new" ? newAlbum.trim() : albumSel;
   // Les colonnes d'organisation existent-elles dans la base ? (script SQL à lancer une seule fois)
   const ready = photos.length === 0 || "ordre" in photos[0];
+  // Les colonnes de la miniature personnalisée existent-elles ? (même script SQL, à relancer une fois)
+  const coverReady = photos.length === 0 || "couverture_url" in photos[0];
+  const [picker, setPicker] = useState(null); // nom de l'album dont on choisit la miniature dans les autres albums
+  const [coverBusy, setCoverBusy] = useState(null);
+  const [dates, setDates] = useState({}); // dates en cours de modification : { nomAlbum: "AAAA-MM-JJ" }
 
   // Un nouvel album passe en tête (si l'ordre des albums a déjà été choisi).
   const firstAlbumOrder = () => {
@@ -4666,8 +4677,9 @@ function AdminGallery({ photos, setPhotos, notify }) {
     if (albumSel === "__new") { setAlbum(target); setNewAlbum(""); }
   };
 
-  const removePhotos = async (list, msg) => {
+  const removePhotos = async (list, msg, withCover = false) => {
     const paths = list.map((p) => p.path).filter(Boolean);
+    if (withCover) list.forEach((p) => { if (p.couverture_path && !paths.includes(p.couverture_path)) paths.push(p.couverture_path); });
     const { error } = await sb.from("photos").delete().in("id", list.map((p) => p.id));
     if (error) return notify("Suppression impossible : " + error.message, "error");
     if (paths.length) await sb.storage.from("images").remove(paths);
@@ -4745,12 +4757,70 @@ function AdminGallery({ photos, setPhotos, notify }) {
     reorderPhotos(a, ids);
   };
   const setCover = async (a, p) => {
-    if (a.cover && a.cover.id === p.id) return;
+    if (!a.coverCustom && a.cover && a.cover.id === p.id) return;
+    // Choisir une photo de l'album retire la miniature personnalisée (et son fichier importé).
+    const clear = coverReady ? { couverture_url: null, couverture_path: null } : {};
+    const oldPaths = a.coverCustom ? [...new Set(a.photos.map((x) => x.couverture_path).filter(Boolean))] : [];
     const ok = await apply(
-      [sb.from("photos").update({ couverture: false }).eq("album", a.nom).neq("id", p.id), sb.from("photos").update({ couverture: true }).eq("id", p.id)],
-      (all) => all.map((x) => (x.album === a.nom ? { ...x, couverture: x.id === p.id } : x))
+      [sb.from("photos").update({ couverture: false, ...clear }).eq("album", a.nom).neq("id", p.id), sb.from("photos").update({ couverture: true, ...clear }).eq("id", p.id)],
+      (all) => all.map((x) => (x.album === a.nom ? { ...x, couverture: x.id === p.id, ...clear } : x))
     );
-    if (ok) notify("Miniature de l'album mise à jour.");
+    if (ok) {
+      if (oldPaths.length) await sb.storage.from("images").remove(oldPaths);
+      notify("Miniature de l'album mise à jour.");
+    }
+  };
+
+  // Miniature personnalisée : enregistrée sur toutes les photos de l'album (elle survit à la suppression d'une photo).
+  const setCustomCover = async (a, url, path) => {
+    const oldPaths = [...new Set(a.photos.map((x) => x.couverture_path).filter(Boolean))].filter((x) => x !== path);
+    const patch = { couverture_url: url, couverture_path: path };
+    const ok = await apply(
+      [sb.from("photos").update(patch).eq("album", a.nom)],
+      (all) => all.map((x) => (x.album === a.nom ? { ...x, ...patch } : x))
+    );
+    if (ok && oldPaths.length) await sb.storage.from("images").remove(oldPaths);
+    return ok;
+  };
+  const uploadCover = async (a, e) => {
+    const file = (e.target.files || [])[0]; e.target.value = "";
+    if (!file) return;
+    setCoverBusy(a.nom);
+    try {
+      const up = await uploadImage(`site/galerie/${slugify(a.nom)}/miniature`, await compressImage(file, 1200, 0.82));
+      if (await setCustomCover(a, up.url, up.path)) notify("Miniature de l'album mise à jour.");
+      else await sb.storage.from("images").remove([up.path]);
+    } catch (err) { notify(err.message || "Envoi impossible.", "error"); }
+    setCoverBusy(null);
+  };
+  // Photo prise dans un autre album : on en fait une copie, pour que la miniature reste si l'originale est supprimée.
+  const pickCover = async (a, p) => {
+    setPicker(null); setCoverBusy(a.nom);
+    try {
+      let url = p.url, path = null;
+      try {
+        const blob = await (await fetch(p.url)).blob();
+        const up = await uploadImage(`site/galerie/${slugify(a.nom)}/miniature`, await compressImage(new File([blob], "miniature.jpg", { type: blob.type || "image/jpeg" }), 1200, 0.82));
+        url = up.url; path = up.path;
+      } catch (err) { /* copie impossible : on garde simplement le lien de la photo */ }
+      if (await setCustomCover(a, url, path)) notify("Miniature de l'album mise à jour.");
+      else if (path) await sb.storage.from("images").remove([path]);
+    } catch (err) { notify(err.message || "Modification impossible.", "error"); }
+    setCoverBusy(null);
+  };
+  const resetCover = async (a) => { if (await setCustomCover(a, null, null)) notify("Miniature automatique rétablie."); };
+
+  // Date de l'album : appliquée à toutes ses photos.
+  const dateOf = (a) => String(a.date || "").slice(0, 10);
+  const saveDate = async (a) => {
+    const value = dates[a.nom];
+    setDates((d) => { const n = { ...d }; delete n[a.nom]; return n; });
+    if (!value || value.length !== 10 || value === dateOf(a)) return;
+    const ok = await apply(
+      [sb.from("photos").update({ date: value }).eq("album", a.nom)],
+      (all) => all.map((x) => (x.album === a.nom ? { ...x, date: value } : x))
+    );
+    if (ok) notify("Date de l'album mise à jour.");
   };
   const moveToAlbum = async (p, value) => {
     let to = value;
@@ -4760,9 +4830,11 @@ function AdminGallery({ photos, setPhotos, notify }) {
     }
     if (to === p.album) return;
     const dest = albums.find((a) => a.nom === to);
+    const dc = dest && dest.photos.find((x) => x.couverture_url);
+    const coverPatch = coverReady ? { couverture_url: dc ? dc.couverture_url : null, couverture_path: dc ? dc.couverture_path : null } : {};
     const patch = dest
-      ? { album: to, ordre: Math.max(-1, ...dest.photos.map((x) => (Number.isFinite(x.ordre) ? x.ordre : -1))) + 1, couverture: false, date: dest.date, album_ordre: dest.ordre }
-      : { album: to, ordre: 0, couverture: false, album_ordre: firstAlbumOrder() };
+      ? { album: to, ordre: Math.max(-1, ...dest.photos.map((x) => (Number.isFinite(x.ordre) ? x.ordre : -1))) + 1, couverture: false, date: dest.date, album_ordre: dest.ordre, ...coverPatch }
+      : { album: to, ordre: 0, couverture: false, album_ordre: firstAlbumOrder(), ...coverPatch };
     const ok = await apply(
       [sb.from("photos").update(patch).eq("id", p.id)],
       (all) => all.map((x) => (x.id === p.id ? { ...x, ...patch } : x))
@@ -4774,10 +4846,10 @@ function AdminGallery({ photos, setPhotos, notify }) {
 
   return (
     <div className="space-y-6">
-      {!ready && (
+      {(!ready || !coverReady) && (
         <div className="rounded-2xl bg-amber-50 border border-amber-200 p-5 text-sm text-amber-900 space-y-3">
-          <p className="font-bold">Une dernière étape pour organiser les albums</p>
-          <p>Pour pouvoir ordonner les albums et les photos et choisir la miniature de chaque album, lancez ce script une seule fois dans Supabase (menu « SQL Editor »), puis rechargez le site. En attendant, l'ajout, les légendes et la suppression fonctionnent comme avant.</p>
+          <p className="font-bold">{ready ? "Une dernière étape pour les miniatures personnalisées" : "Une dernière étape pour organiser les albums"}</p>
+          <p>{ready ? "Pour pouvoir choisir pour un album une miniature qui n'est pas dans l'album, lancez ce script une seule fois dans Supabase (menu « SQL Editor »), puis rechargez le site. La date des albums est déjà modifiable." : "Pour pouvoir ordonner les albums et les photos et choisir la miniature de chaque album, lancez ce script une seule fois dans Supabase (menu « SQL Editor »), puis rechargez le site. En attendant, l'ajout, les légendes, la suppression et la date des albums fonctionnent comme avant."}</p>
           <pre className="bg-white border border-amber-200 rounded-xl p-3 text-xs overflow-x-auto whitespace-pre">{GALLERY_SQL}</pre>
           <button onClick={() => { try { navigator.clipboard.writeText(GALLERY_SQL); notify("Script copié."); } catch (e) { /* copie impossible */ } }} className="px-4 py-2 rounded-xl bg-amber-600 text-white font-semibold hover:bg-amber-700">Copier le script</button>
         </div>
@@ -4805,7 +4877,7 @@ function AdminGallery({ photos, setPhotos, notify }) {
       {ready && albums.length > 0 && (
         <div className="rounded-2xl bg-orange-50 border border-orange-200 p-4 text-sm text-orange-900 flex items-start gap-3">
           <Info size={18} className="flex-shrink-0 mt-0.5" />
-          <p>Les albums apparaissent dans la médiathèque dans l'ordre ci-dessous (flèches ↑ ↓). Dans un album, l'étoile choisit la <strong>miniature</strong> affichée dans la médiathèque ; les flèches ← → ou le glisser-déposer changent l'ordre des photos ; « Déplacer vers » envoie une photo dans un autre album.</p>
+          <p>Les albums apparaissent dans la médiathèque dans l'ordre ci-dessous (flèches ↑ ↓). Dans un album, l'étoile choisit la <strong>miniature</strong> affichée dans la médiathèque (vous pouvez aussi importer une autre image ou en prendre une dans un autre album) ; les flèches ← → ou le glisser-déposer changent l'ordre des photos ; « Déplacer vers » envoie une photo dans un autre album.</p>
         </div>
       )}
 
@@ -4823,7 +4895,7 @@ function AdminGallery({ photos, setPhotos, notify }) {
                   </>
                 )}
                 <button onClick={() => setRenaming({ from: a.nom, value: a.nom })} aria-label="Renommer l'album" title="Renommer l'album" className="w-9 h-9 rounded-lg text-slate-600 hover:bg-slate-100 flex items-center justify-center"><Pencil size={16} /></button>
-                <ConfirmButton onConfirm={() => removePhotos(list, `Album « ${a.nom} » supprimé.`)} confirmLabel="Tout supprimer ?" className="px-3 py-1.5 rounded-lg text-xs font-semibold text-rose-600 hover:bg-rose-50">Supprimer l'album</ConfirmButton>
+                <ConfirmButton onConfirm={() => removePhotos(list, `Album « ${a.nom} » supprimé.`, true)} confirmLabel="Tout supprimer ?" className="px-3 py-1.5 rounded-lg text-xs font-semibold text-rose-600 hover:bg-rose-50">Supprimer l'album</ConfirmButton>
               </div>
             }>
             {isRenaming && (
@@ -4835,9 +4907,68 @@ function AdminGallery({ photos, setPhotos, notify }) {
                 </div>
               </div>
             )}
+            <div className="mb-6 grid md:grid-cols-2 gap-5">
+              <div className="rounded-2xl border border-slate-200 p-4">
+                <p className="text-sm font-bold text-slate-900 flex items-center gap-2"><Calendar size={16} className="text-orange-600" /> Date de l'album</p>
+                <p className="text-xs text-slate-500 mt-1">Elle s'affiche sous le nom de l'album dans la médiathèque.</p>
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <input type="date" value={dates[a.nom] !== undefined ? dates[a.nom] : dateOf(a)} onChange={(e) => setDates((d) => ({ ...d, [a.nom]: e.target.value }))} className={inputCls + " mt-0 w-auto"} />
+                  {dates[a.nom] !== undefined && dates[a.nom] !== dateOf(a) && (
+                    <>
+                      <button disabled={busy || !dates[a.nom]} onClick={() => saveDate(a)} className="px-4 py-2 rounded-xl bg-orange-600 text-white text-sm font-semibold hover:bg-orange-700 disabled:opacity-50">Enregistrer</button>
+                      <button onClick={() => setDates((d) => { const n = { ...d }; delete n[a.nom]; return n; })} className="px-4 py-2 rounded-xl bg-white border border-slate-300 text-sm">Annuler</button>
+                    </>
+                  )}
+                </div>
+              </div>
+              <div className="rounded-2xl border border-slate-200 p-4">
+                <p className="text-sm font-bold text-slate-900 flex items-center gap-2"><ImageIcon size={16} className="text-orange-600" /> Miniature de l'album</p>
+                <div className="mt-3 flex gap-4 items-start">
+                  <div className="relative w-32 flex-shrink-0 aspect-video rounded-xl overflow-hidden bg-slate-100">
+                    {a.coverUrl && <img src={a.coverUrl} alt="" className="w-full h-full object-cover" />}
+                    {coverBusy === a.nom && <div className="absolute inset-0 bg-white bg-opacity-70 flex items-center justify-center text-xs font-semibold text-slate-700">Envoi…</div>}
+                  </div>
+                  <div className="flex-1 min-w-0 space-y-2">
+                    <p className="text-xs text-slate-500">{a.coverCustom ? "Image personnalisée." : "Choisie parmi les photos de l'album (étoile ci-dessous)."}</p>
+                    {coverReady ? (
+                      <div className="flex flex-wrap gap-2">
+                        <label className={`px-3 py-1.5 rounded-lg bg-orange-600 text-white text-xs font-semibold ${coverBusy || busy ? "opacity-50 cursor-wait" : "cursor-pointer hover:bg-orange-700"}`}>
+                          Importer une image
+                          <input type="file" accept="image/*" disabled={!!coverBusy || busy} onChange={(e) => uploadCover(a, e)} className="hidden" />
+                        </label>
+                        <button disabled={!!coverBusy || busy || albums.length < 2} onClick={() => setPicker(picker === a.nom ? null : a.nom)} className="px-3 py-1.5 rounded-lg bg-white border border-slate-300 text-xs font-semibold text-slate-700 hover:border-orange-500 disabled:opacity-40">Prendre dans un autre album</button>
+                        {a.coverCustom && <button disabled={!!coverBusy || busy} onClick={() => resetCover(a)} className="px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-100">Revenir à une photo de l'album</button>}
+                      </div>
+                    ) : <p className="text-xs text-amber-700">Lancez d'abord le script SQL ci-dessus.</p>}
+                  </div>
+                </div>
+              </div>
+            </div>
+            {picker === a.nom && (
+              <div className="mb-6 rounded-2xl border border-orange-200 bg-orange-50 p-4">
+                <div className="flex items-center justify-between gap-3 mb-3">
+                  <p className="text-sm font-bold text-orange-900">Cliquez sur la photo à utiliser comme miniature de « {a.nom} »</p>
+                  <button onClick={() => setPicker(null)} className="px-3 py-1.5 rounded-lg bg-white border border-slate-300 text-xs">Fermer</button>
+                </div>
+                <div className="max-h-96 overflow-y-auto space-y-4 pr-1">
+                  {albums.filter((o) => o.nom !== a.nom).map((o) => (
+                    <div key={o.nom}>
+                      <p className="text-xs font-semibold text-slate-600 mb-1.5">{o.nom} ({o.photos.length})</p>
+                      <div className="grid grid-cols-4 sm:grid-cols-6 lg:grid-cols-8 gap-2">
+                        {o.photos.map((p) => (
+                          <button key={p.id} onClick={() => pickCover(a, p)} className="aspect-square rounded-lg overflow-hidden bg-slate-100 hover:ring-4 hover:ring-orange-500 transition">
+                            <img src={p.url} alt={p.legende || o.nom} loading="lazy" className="w-full h-full object-cover" />
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
               {list.map((p, i) => {
-                const isCover = a.cover && a.cover.id === p.id;
+                const isCover = !a.coverCustom && a.cover && a.cover.id === p.id;
                 return (
                   <div key={p.id} className={`space-y-1.5 rounded-xl ${dragId === p.id ? "opacity-40" : ""}`}
                     draggable={ready}
