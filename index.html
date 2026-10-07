@@ -667,7 +667,7 @@ const readSeen = () => { try { return JSON.parse(window.localStorage.getItem(SEE
 const writeSeen = (s) => { try { window.localStorage.setItem(SEEN_KEY, JSON.stringify(s)); } catch (e) { /* navigateur sans stockage : tant pis */ } };
 const TRACKED = ["actualites", "evenements", "opportunites", "mediatheque"];
 // Pages du site : chacune a son adresse (cge-arstm.com/#evenements…), pour partager un lien et pour le bouton Retour.
-const PAGES_SITE = ["accueil", "apropos", "bureau", "actualites", "evenements", "opportunites", "alumni", "mediatheque", "partenaires", "adhesion", "contact", "profil", "admin"];
+const PAGES_SITE = ["accueil", "apropos", "bureau", "actualites", "evenements", "opportunites", "alumni", "mediatheque", "partenaires", "adhesion", "contact", "confidentialite", "profil", "admin"];
 // Page indiquée dans l'adresse ; toute autre valeur (par exemple celle ajoutée par Supabase après un email) mène à l'accueil.
 // Adresses propres (v103, site hébergé sur Cloudflare Pages) : cge-arstm.com/bureau.
 // Les anciens liens cge-arstm.com/#bureau sont convertis automatiquement ; les valeurs ajoutées par Supabase après un email ne sont pas touchées.
@@ -1825,6 +1825,8 @@ function App() {
           reload={() => { loadAll(); loadAdhesions(); }} notify={notify} openLogin={openLogin} go={go} />}
 
         {/* ===== CONTACT ===== */}
+        {page === "confidentialite" && <PrivacyPage go={go} />}
+
         {page === "contact" && <ContactPage user={user} profile={profile} notify={notify} presetSubject={contactSubject} />}
 
         {/* ===== MON ESPACE ===== */}
@@ -1883,7 +1885,7 @@ function App() {
             </div>
           </div>
         </div>
-        <div className="border-t border-slate-800 text-center text-xs py-5">© {new Date().getFullYear()} CGE ARSTM · Tous droits réservés</div>
+        <div className="border-t border-slate-800 text-center text-xs py-5">© {new Date().getFullYear()} CGE ARSTM · Tous droits réservés · <a href="/confidentialite" onClick={(e) => { e.preventDefault(); go("confidentialite"); }} className="underline hover:text-orange-400">Politique de confidentialité</a></div>
       </footer>
 
       {loginOpen && <LoginModal onClose={() => setLoginOpen(false)} onLogin={handleLogin} onRegister={handleRegister} onForgot={handleForgot} />}
@@ -3086,6 +3088,56 @@ function PartnersPage({ partenaires, onBecomePartner }) {
 // =====================================================================
 // CONTACT
 // =====================================================================
+// Politique de confidentialité (page publique, /confidentialite).
+function PrivacyPage({ go }) {
+  const mail = CONTACT.email;
+  const H = ({ children }) => <h2 className="text-xl font-extrabold text-slate-900 mt-10 mb-3">{children}</h2>;
+  const P = ({ children }) => <p className="text-slate-700 leading-relaxed mb-3">{children}</p>;
+  const L = ({ children }) => <li className="text-slate-700 leading-relaxed">{children}</li>;
+  return (
+    <div>
+      <PageHero kicker="Vos données" title="Politique de confidentialité" sub="Quelles informations nous collectons, pourquoi, et comment vous gardez la main dessus." icon={KeyRound} />
+      <main className="max-w-3xl mx-auto px-4 py-12 -mt-10 relative">
+        <div className="bg-white rounded-3xl shadow-xl p-6 sm:p-10">
+          <P>Ce site est celui de la CGE ARSTM, section ARSTM de la Conférence des Grandes Écoles de Côte d'Ivoire. Il est géré par des élèves bénévoles du bureau. Dernière mise à jour : {new Date().toLocaleDateString("fr-FR", { month: "long", year: "numeric" })}.</P>
+
+          <H>1. Les informations que nous collectons</H>
+          <ul className="list-disc pl-5 space-y-1.5 mb-3">
+            <L><strong>Votre compte :</strong> adresse email et mot de passe (le mot de passe est chiffré, nous ne pouvons pas le lire).</L>
+            <L><strong>Votre profil :</strong> nom, prénoms, matricule, filière, promotion, et, si vous les renseignez, téléphone, ville, photo, parcours, CV, LinkedIn.</L>
+            <L><strong>Vos démarches sur le site :</strong> candidatures à des opportunités, inscriptions à des événements, demandes d'adhésion, messages envoyés via le formulaire de contact, réponses aux sondages, demandes de mentorat.</L>
+          </ul>
+          <P>Nous ne collectons aucune donnée de paiement et n'utilisons ni publicité ni outil de suivi publicitaire.</P>
+
+          <H>2. Pourquoi nous les utilisons</H>
+          <P>Uniquement pour faire fonctionner la vie de l'association : gérer les comptes et les adhésions, organiser les événements, mettre en relation élèves, anciens et partenaires, et répondre à vos messages. Votre fiche n'apparaît dans l'annuaire des anciens que si vous avez choisi d'y figurer.</P>
+
+          <H>3. Qui peut voir vos informations</H>
+          <P>Les administrateurs et les membres du bureau habilités voient les informations nécessaires à la gestion (liste des membres, candidatures, inscriptions). Les autres membres ne voient que ce que vous avez choisi de rendre visible. Nous ne vendons ni ne louons vos données.</P>
+
+          <H>4. Où elles sont stockées</H>
+          <P>Les données du site sont hébergées chez notre prestataire technique Supabase, derrière des règles d'accès qui limitent chaque personne à ce qu'elle a le droit de voir. Les documents peuvent aussi être placés sur Google Drive (voir ci-dessous).</P>
+
+          <H>5. Google Drive</H>
+          <P>Les administrateurs peuvent envoyer des documents (comptes rendus, formulaires, guides) vers le Google Drive de la CGE depuis l'espace d'administration. Pour cela, le site demande à l'administrateur l'autorisation Google « drive.file », qui donne accès <strong>uniquement aux fichiers que le site a lui-même créés</strong>, dans le dossier « CGE ARSTM - Documents ». Le site n'accède ni au reste du Drive, ni à vos emails, ni à vos contacts. Il ne stocke aucun identifiant Google, et les visiteurs et membres n'ont jamais à se connecter à Google. Les fichiers partagés ainsi sont lisibles par toute personne disposant de leur lien : n'y déposez jamais de document confidentiel.</P>
+
+          <H>6. Combien de temps</H>
+          <P>Nous gardons vos données tant que votre compte existe. Si vous demandez la suppression de votre compte, votre profil et vos démarches associées sont effacés, sauf ce que la gestion de l'association nous oblige à conserver (par exemple le registre des adhésions).</P>
+
+          <H>7. Vos droits</H>
+          <P>Vous pouvez à tout moment consulter et modifier vos informations depuis « Mon espace », demander une copie de vos données, ou en demander la correction ou la suppression, en nous écrivant{mail ? <> à <a href={"mailto:" + mail} className="text-orange-600 font-semibold underline">{mail}</a></> : <> via la <a href="/contact" onClick={(e) => { e.preventDefault(); go("contact"); }} className="text-orange-600 font-semibold underline">page Contact</a></>}.</P>
+
+          <H>8. Cookies</H>
+          <P>Le site utilise seulement le stockage technique de votre navigateur pour garder votre session ouverte. Il n'y a pas de cookie publicitaire.</P>
+
+          <H>9. Modifications</H>
+          <P>Si cette politique change, la date de mise à jour ci-dessus sera modifiée. Pour toute question, utilisez la <a href="/contact" onClick={(e) => { e.preventDefault(); go("contact"); }} className="text-orange-600 font-semibold underline">page Contact</a>.</P>
+        </div>
+      </main>
+    </div>
+  );
+}
+
 function ContactPage({ user, profile, notify, presetSubject }) {
   const init = {
     name: user ? [profile.prenoms, profile.nom].filter(Boolean).join(" ") : "",
