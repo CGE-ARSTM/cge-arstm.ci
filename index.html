@@ -1008,7 +1008,8 @@ function App() {
   }, []);
 
   // ----- Chargement des données (relancé à chaque connexion / déconnexion) -----
-  const loadAll = async () => {
+  // silent = rafraîchissement automatique en arrière-plan : sans message, sans toucher au formulaire de profil en cours de saisie.
+  const loadAll = async (silent = false) => {
     const id = ++loadId.current;
     const errors = [];
     const q = (query) => query.then(({ data, error }) => { if (error) errors.push(error); return data ?? []; });
@@ -1054,8 +1055,10 @@ function App() {
         cge ? q(sb.rpc("resultats_sondages")) : [],
       ]);
       if (id !== loadId.current) return;
+      // En mode silencieux, si le réseau a échoué on garde l'affichage actuel plutôt que de tout vider.
+      if (silent && errors.length) return;
       setMe(myRow);
-      setProfile(myRow ? rowToProfile(myRow) : EMPTY_PROFILE);
+      if (!silent) setProfile(myRow ? rowToProfile(myRow) : EMPTY_PROFILE);
       setNews(n.map(newsFromDb)); setEvents(e); setJobs(j); setAlumni(a);
       setApplications(apps.map(appFromDb)); setRegistrations(regs.map(regFromDb));
       setImgOverrides(Object.fromEntries(imgs.map((r) => [r.key, r.url])));
@@ -1067,12 +1070,38 @@ function App() {
       if (errors.length) notify("Connexion à la base incomplète : " + errors[0].message, "error");
     } catch (err) {
       console.error(err);
-      notify("Impossible de joindre la base de données. Vérifiez votre connexion internet.", "error");
+      if (!silent) notify("Impossible de joindre la base de données. Vérifiez votre connexion internet.", "error");
     } finally {
       if (id === loadId.current) setFirstLoad(false);
     }
   };
   useEffect(() => { if (authReady) loadAll(); }, [uid, authReady]);
+
+  // ----- Rafraîchissement automatique (plus besoin d'actualiser la page) -----
+  // Toutes les 45 s quand l'onglet est visible, et dès qu'on revient sur l'onglet / l'application ou que la connexion revient.
+  const loadAllRef = useRef(null);
+  loadAllRef.current = (silent) => Promise.all([loadAll(silent), loadSettings(), loadAdhesions()]);
+  useEffect(() => {
+    if (!authReady) return;
+    let running = false, last = Date.now();
+    const refresh = async () => {
+      if (running || document.visibilityState !== "visible" || navigator.onLine === false) return;
+      running = true;
+      try { await loadAllRef.current(true); } finally { running = false; last = Date.now(); }
+    };
+    const timer = setInterval(refresh, 45000);
+    const onVisible = () => { if (document.visibilityState === "visible" && Date.now() - last > 10000) refresh(); };
+    const onBack = () => { if (Date.now() - last > 10000) refresh(); };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onBack);
+    window.addEventListener("online", onBack);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onBack);
+      window.removeEventListener("online", onBack);
+    };
+  }, [authReady, uid]);
 
   // L'icône de l'onglet suit le logo choisi par l'administrateur.
   useEffect(() => {
