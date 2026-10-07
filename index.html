@@ -1203,11 +1203,13 @@ function App() {
   const openJobs = jobs.filter((j) => !isExpired(j));
   const official = partenaires.filter((p) => p.role === "Partenaire officiel");
 
+  // Rubrique « Documents » de la médiathèque : réservée aux membres CGE, aux anciens, au bureau et aux administrateurs.
+  const canSeeDocs = !!me && (!!me.membre_cge || me.type === "ancien" || isAdmin || ((me.permissions || []).length > 0));
   const newCounts = {
     actualites: visibleNews.filter((n) => newer(n.created_at, seenOf("actualites"))).length + pollsToVote.length,
     evenements: upcoming.filter((e) => newer(e.created_at, seenOf("evenements"))).length,
     opportunites: user ? openJobs.filter((j) => newer(j.created_at, seenOf("opportunites"))).length : 0,
-    mediatheque: documents.filter((d) => newer(d.created_at, seenOf("mediatheque"))).length
+    mediatheque: (canSeeDocs ? documents : documents.filter((d) => d.type === "video")).filter((d) => newer(d.created_at, seenOf("mediatheque"))).length
       + new Set(photos.filter((p) => newer(p.created_at, seenOf("mediatheque"))).map((p) => p.album)).size,
   };
 
@@ -1810,7 +1812,7 @@ function App() {
         )}
 
         {/* ===== MÉDIATHÈQUE ===== */}
-        {page === "mediatheque" && <MediaPage user={user} documents={documents} photos={photos} notify={notify} openLogin={openLogin} since={sinceFor("mediatheque")} />}
+        {page === "mediatheque" && <MediaPage user={user} canSeeDocs={canSeeDocs} documents={documents} photos={photos} notify={notify} openLogin={openLogin} since={sinceFor("mediatheque")} />}
 
         {/* ===== PARTENAIRES ===== */}
         {page === "partenaires" && <PartnersPage partenaires={partenaires} onBecomePartner={() => goContact("Partenariat / entreprise")} />}
@@ -2557,8 +2559,9 @@ function MentorRequestModal({ mentor, profile, onClose, onSend }) {
 // =====================================================================
 // MÉDIATHÈQUE : photos, documents, vidéos
 // =====================================================================
-function MediaPage({ user, documents, photos, notify, openLogin, since }) {
-  const [tab, setTab] = useState("photos");
+function MediaPage({ user, canSeeDocs, documents, photos, notify, openLogin, since }) {
+  const [tabRaw, setTab] = useState("photos");
+  const tab = tabRaw === "documents" && !canSeeDocs ? "photos" : tabRaw; // un visiteur ne peut jamais tomber sur Documents
   const [album, setAlbum] = useState(null);
   const [lightbox, setLightbox] = useState(null);
   const [cat, setCat] = useState("Toutes");
@@ -2576,11 +2579,11 @@ function MediaPage({ user, documents, photos, notify, openLogin, since }) {
   const cats = ["Toutes", ...new Set(files.map((d) => d.categorie))];
   const shownFiles = files.filter((d) => (cat === "Toutes" || d.categorie === cat) && (!q || [d.titre, d.description].join(" ").toLowerCase().includes(q.toLowerCase())));
   const openDoc = (d) => (d.type === "lien" ? window.open(d.lien, "_blank", "noopener") : downloadDoc(d, notify));
-  const tabs = [["photos", `Photos (${photos.length})`, Camera], ["documents", `Documents (${files.length})`, FileText], ["videos", `Vidéos (${videos.length})`, Video]];
+  const tabs = [["photos", `Photos (${photos.length})`, Camera], ...(canSeeDocs ? [["documents", `Documents (${files.length})`, FileText]] : []), ["videos", `Vidéos (${videos.length})`, Video]];
 
   return (
     <>
-      <PageHero kicker="Souvenirs & ressources" title="Médiathèque" sub="Les photos de nos événements, les documents utiles et nos vidéos." icon={ImageIcon} />
+      <PageHero kicker="Souvenirs & ressources" title="Médiathèque" sub={canSeeDocs ? "Les photos de nos événements, les documents utiles et nos vidéos." : "Les photos de nos événements et nos vidéos."} icon={ImageIcon} />
       <main className="max-w-6xl mx-auto px-4 py-16">
         <div className="flex flex-wrap gap-2 mb-8">
           {tabs.map(([k, l, I]) => (
