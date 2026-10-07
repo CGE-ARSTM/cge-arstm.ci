@@ -671,7 +671,7 @@ const readSeen = () => { try { return JSON.parse(window.localStorage.getItem(SEE
 const writeSeen = (s) => { try { window.localStorage.setItem(SEEN_KEY, JSON.stringify(s)); } catch (e) { /* navigateur sans stockage : tant pis */ } };
 const TRACKED = ["actualites", "evenements", "opportunites", "mediatheque"];
 // Pages du site : chacune a son adresse (cge-arstm.com/#evenements…), pour partager un lien et pour le bouton Retour.
-const PAGES_SITE = ["accueil", "apropos", "bureau", "actualites", "evenements", "opportunites", "alumni", "mediatheque", "partenaires", "adhesion", "contact", "confidentialite", "profil", "admin"];
+const PAGES_SITE = ["accueil", "apropos", "bureau", "actualites", "evenements", "opportunites", "alumni", "mediatheque", "partenaires", "adhesion", "contact", "confidentialite", "profil", "admin", "anciens-bureaux"];
 // Page indiquée dans l'adresse ; toute autre valeur (par exemple celle ajoutée par Supabase après un email) mène à l'accueil.
 // Adresses propres (v103, site hébergé sur Cloudflare Pages) : cge-arstm.com/bureau.
 // Les anciens liens cge-arstm.com/#bureau sont convertis automatiquement ; les valeurs ajoutées par Supabase après un email ne sont pas touchées.
@@ -1494,7 +1494,7 @@ function App() {
   const mobileBtn = (id, label) => (
     <button key={id} onClick={() => go(id)} className={`text-left px-3 py-3 rounded-lg flex items-center ${page === id ? "text-orange-600 bg-orange-50 font-semibold" : "text-slate-700"}`}>{label}<NavCount id={id} /></button>
   );
-  const assoActive = navAsso.some(([id]) => id === page);
+  const assoActive = navAsso.some(([id]) => id === page) || page === "anciens-bureaux";
 
   return (
     <ImgCtx.Provider value={{ images, overrides: imgOverrides, saveImage, access: { logged: !!user, isCge, join: goAdhesion, numero: me && me.membre_cge ? (me.numero_membre || "") : null,
@@ -1722,7 +1722,10 @@ function App() {
           </>
         )}
 
-        {page === "bureau" && <AnciensBureaux postes={postesAnciens} />}
+        {page === "bureau" && <AnciensBureauxLien postes={postesAnciens} go={go} />}
+
+        {/* ===== ANCIENS BUREAUX (sous-page de « Le bureau ») ===== */}
+        {page === "anciens-bureaux" && <AnciensBureauxPage postes={postesAnciens} go={go} />}
 
         {/* ===== ACTUALITÉS (+ sondages pour les membres) ===== */}
         {page === "actualites" && (
@@ -2032,10 +2035,16 @@ function PostesAdminDialog({ m, onClose, onSave }) {
   );
 }
 
-// Page « Le bureau » : les anciens bureaux. Une frise des mandats (du plus récent au plus ancien),
-// puis, pour le mandat choisi : le président en vedette et l'équipe regroupée par département.
-function AnciensBureaux({ postes }) {
-  const [choix, setChoix] = useState(null);
+// =====================================================================
+// ANCIENS BUREAUX : sous-page de « Le bureau » (/anciens-bureaux)
+// Une frise à cliquer pour choisir un ou plusieurs mandats (comparaison côte à côte),
+// une recherche, et le « parcours » d'une personne en un clic sur son nom.
+// =====================================================================
+const normaliser = (s) => String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+const estPresidentPoste = (x) => /^pr[ée]sident/i.test(String(x.intitule || "").trim()) && !/vice/i.test(String(x.intitule || ""));
+
+// Regroupe les postes déclarés par les anciens en mandats (du plus récent au plus ancien).
+function mandatsAnciens(postes) {
   const groupes = {};
   (postes || []).forEach((a) => postesValides(a.postes).forEach((p) => {
     const k = periodePoste(p);
@@ -2043,86 +2052,173 @@ function AnciensBureaux({ postes }) {
     if (!groupes[k]) groupes[k] = { k, debut: p.debut || "", fin: p.fin || p.debut || "", gens: [] };
     groupes[k].gens.push({ nom: a.nom, photo: a.photo, promo: a.promotion, intitule: p.intitule, departement: p.departement });
   }));
-  const liste = Object.values(groupes).sort((a, b) => b.debut.localeCompare(a.debut) || b.fin.localeCompare(a.fin));
-  if (!liste.length) return null;
-  const rang = (t) => { const i = POSTES_LISTE.indexOf(t); return i < 0 ? 99 : i; };
-  const trier = (arr) => [...arr].sort((a, b) => rang(a.intitule) - rang(b.intitule) || String(a.nom).localeCompare(String(b.nom), "fr"));
-  const g = liste.find((x) => x.k === choix) || liste[0];
-  const estPresident = (x) => /^pr[ée]sident/i.test(String(x.intitule || "").trim()) && !/vice/i.test(x.intitule);
-  const presidents = trier(g.gens.filter(estPresident));
-  const equipe = g.gens.filter((x) => !estPresident(x));
-  // Regroupement par département (ceux sans département forment « Bureau exécutif », toujours en premier).
-  const parDept = {};
-  equipe.forEach((x) => { const d = String(x.departement || "").trim() || "Bureau exécutif"; (parDept[d] = parDept[d] || []).push(x); });
-  const depts = Object.keys(parDept).sort((a, b) => (a === "Bureau exécutif" ? -1 : b === "Bureau exécutif" ? 1 : a.localeCompare(b, "fr")));
-  const Photo = ({ x, cls = "" }) => (x.photo
-    ? <img src={x.photo} alt={x.nom} loading="lazy" className={`w-full h-full object-cover object-[center_25%] ${cls}`} />
-    : <div className={`w-full h-full flex items-center justify-center bg-gradient-to-br from-slate-800 to-slate-600 text-white font-extrabold text-3xl ${cls}`}>{initials(x.nom)}</div>);
+  return Object.values(groupes).sort((a, b) => b.debut.localeCompare(a.debut) || b.fin.localeCompare(a.fin));
+}
+
+// Petit bandeau sur la page « Le bureau » : mène à la sous-page.
+function AnciensBureauxLien({ postes, go }) {
+  const liste = mandatsAnciens(postes);
+  const gens = new Set(liste.flatMap((m) => m.gens.map((x) => x.nom))).size;
   return (
     <section className="max-w-6xl mx-auto px-4 pb-16">
-      <SectionTitle kicker="Notre histoire" title="Les anciens bureaux" />
+      <button onClick={() => go("anciens-bureaux")} className="w-full group flex items-center gap-4 bg-white rounded-2xl border border-slate-200 hover:border-orange-300 hover:shadow-md px-4 py-3.5 text-left transition">
+        <span className="w-10 h-10 rounded-xl bg-orange-50 text-orange-600 flex items-center justify-center flex-shrink-0"><HistoryIcon size={20} /></span>
+        <span className="min-w-0 flex-1">
+          <span className="block font-bold text-slate-900">Les anciens bureaux</span>
+          <span className="block text-sm text-slate-500">{liste.length ? `${liste.length} mandat${liste.length > 1 ? "s" : ""} · ${gens} ancien${gens > 1 ? "s" : ""} membre${gens > 1 ? "s" : ""}` : "Retrouvez les équipes des mandats précédents"}</span>
+        </span>
+        <span className="text-orange-600 font-semibold text-sm flex items-center gap-1 group-hover:gap-2 transition-all whitespace-nowrap">Explorer <ChevronRight size={16} /></span>
+      </button>
+    </section>
+  );
+}
 
-      {/* Frise des mandats */}
-      <div className="relative -mx-4 px-4 mb-8">
-        <div className="flex gap-2 overflow-x-auto pb-3 profile-space-tabs" role="tablist" aria-label="Mandats">
-          {liste.map((m, i) => {
-            const actif = m.k === g.k;
-            return (
-              <button key={m.k} role="tab" aria-selected={actif} onClick={() => setChoix(m.k)}
-                className={`flex-shrink-0 px-4 py-2.5 rounded-2xl text-left border transition ${actif ? "bg-orange-600 border-orange-600 text-white shadow-lg" : "bg-white border-slate-200 text-slate-700 hover:border-orange-300"}`}>
-                <span className="block text-sm font-extrabold leading-tight">{m.k}</span>
-                <span className={`block text-xs ${actif ? "text-orange-100" : "text-slate-400"}`}>{i === 0 ? "Plus récent · " : ""}{m.gens.length} membre{m.gens.length > 1 ? "s" : ""}</span>
-              </button>
-            );
-          })}
+function AnciensBureauxPage({ postes, go }) {
+  const liste = mandatsAnciens(postes);
+  const [sel, setSel] = useState(null);   // null = le mandat le plus récent
+  const [q, setQ] = useState("");
+  const frise = useRef(null);
+  useEffect(() => { if (frise.current) frise.current.scrollLeft = frise.current.scrollWidth; }, [liste.length]);
+
+  const rang = (t) => { const i = POSTES_LISTE.indexOf(t); return i < 0 ? 99 : i; };
+  const trier = (arr) => [...arr].sort((a, b) => rang(a.intitule) - rang(b.intitule) || String(a.nom).localeCompare(String(b.nom), "fr"));
+  const actifs = sel === null ? (liste[0] ? [liste[0].k] : []) : sel;
+  const bascule = (k) => setSel(actifs.includes(k) ? actifs.filter((x) => x !== k) : [...actifs, k]);
+  const nq = normaliser(q.trim());
+  const correspond = (x) => !nq || normaliser([x.nom, x.intitule, x.departement, x.promo].join(" ")).includes(nq);
+  const choisir = (nom) => { setQ(nom); window.scrollTo({ top: 0, behavior: "smooth" }); };
+
+  const total = new Set(liste.flatMap((m) => m.gens.map((x) => x.nom))).size;
+  const montres = nq ? liste.filter((m) => m.gens.some(correspond)) : liste.filter((m) => actifs.includes(m.k));
+  const noms = [...new Set(liste.flatMap((m) => m.gens.filter(correspond).map((x) => x.nom)))];
+  const parcours = nq && noms.length === 1
+    ? liste.flatMap((m) => m.gens.filter((x) => x.nom === noms[0]).map((x) => ({ k: m.k, intitule: x.intitule, departement: x.departement }))).reverse()
+    : null;
+  const unique = !nq && montres.length === 1;
+
+  const Ligne = ({ x, pres }) => (
+    <button onClick={() => choisir(x.nom)} title="Voir tout son parcours"
+      className={`w-full flex items-center gap-2.5 px-2 py-1.5 rounded-xl text-left transition ${pres ? "bg-orange-50 border border-orange-100 hover:bg-orange-100" : "hover:bg-slate-50"}`}>
+      <Avatar photo={x.photo} name={x.nom} size={pres ? "w-9 h-9" : "w-8 h-8"} text="text-xs" />
+      <span className="min-w-0 flex-1">
+        <span className="block text-sm font-semibold text-slate-900 truncate">{x.nom}</span>
+        <span className={`block text-xs truncate ${pres ? "text-orange-700 font-semibold" : "text-slate-500"}`}>{x.intitule}{x.promo ? ` · Promo ${x.promo}` : ""}</span>
+      </span>
+      {pres && <Star size={14} className="text-orange-500 flex-shrink-0" />}
+    </button>
+  );
+
+  const Carte = ({ m }) => {
+    const membres = nq ? m.gens.filter(correspond) : m.gens;
+    const presidents = trier(membres.filter(estPresidentPoste));
+    const parDept = {};
+    membres.filter((x) => !estPresidentPoste(x)).forEach((x) => { const d = String(x.departement || "").trim() || "Bureau exécutif"; (parDept[d] = parDept[d] || []).push(x); });
+    const depts = Object.keys(parDept).sort((a, b) => (a === "Bureau exécutif" ? -1 : b === "Bureau exécutif" ? 1 : a.localeCompare(b, "fr")));
+    return (
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 fade-up">
+        <div className="flex items-center justify-between gap-2 mb-3">
+          <p className="font-extrabold text-slate-900 flex items-center gap-2"><span className="w-1 h-5 rounded-full bg-orange-600" /> Mandat {m.k}</p>
+          <span className="flex items-center gap-2">
+            <span className="text-xs text-slate-400">{membres.length} membre{membres.length > 1 ? "s" : ""}</span>
+            {!nq && actifs.length > 1 && <button onClick={() => bascule(m.k)} aria-label={`Retirer le mandat ${m.k}`} className="w-6 h-6 rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-700 flex items-center justify-center"><X size={14} /></button>}
+          </span>
         </div>
-      </div>
-
-      <div key={g.k} className="fade-up space-y-10">
-        <div className="flex items-center gap-3">
-          <span className="w-1.5 h-8 rounded-full bg-orange-600" />
-          <h3 className="text-2xl sm:text-3xl font-extrabold text-slate-900">Mandat {g.k}</h3>
+        <div className="space-y-1">
+          {presidents.map((x, i) => <Ligne key={"p" + i} x={x} pres />)}
         </div>
-
-        {/* Président(s) du mandat */}
-        {presidents.length > 0 && (
-          <div className={presidents.length > 1 ? "grid md:grid-cols-2 gap-5" : ""}>
-            {presidents.map((x, i) => (
-              <div key={i} className="relative rounded-3xl overflow-hidden text-white p-6 sm:p-8 flex flex-col sm:flex-row items-center gap-6 shadow-xl" style={{ background: NAVY }}>
-                <div className="absolute -right-10 -bottom-10 w-52 h-52 rounded-full bg-orange-500 opacity-20 blur-3xl" />
-                <div className="relative w-32 h-32 sm:w-40 sm:h-40 flex-shrink-0 rounded-full overflow-hidden ring-8 ring-white ring-opacity-10"><Photo x={x} /></div>
-                <div className="relative text-center sm:text-left min-w-0">
-                  <span className="px-3 py-1 rounded-full bg-orange-600 text-xs font-bold uppercase tracking-wider">{x.intitule}</span>
-                  <h4 className="text-2xl sm:text-3xl font-extrabold mt-3 break-words">{x.nom}</h4>
-                  {x.promo && <p className="text-slate-300 mt-1 text-sm">Promo {x.promo}</p>}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Équipe, département par département */}
         {depts.map((d) => (
-          <div key={d}>
-            <p className="mb-4 text-sm sm:text-base font-bold text-orange-700 flex items-center gap-2">
-              <span className="w-1 h-5 rounded-full bg-orange-500" /> {d}
-              <span className="text-xs font-semibold text-slate-400">({parDept[d].length})</span>
-            </p>
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-5">
-              {trier(parDept[d]).map((x, i) => (
-                <div key={i} className="group bg-white rounded-3xl overflow-hidden text-center shadow-sm hover:shadow-xl hover:-translate-y-1 transition duration-300">
-                  <div className="aspect-square overflow-hidden bg-slate-100"><Photo x={x} cls="group-hover:scale-105 transition duration-500" /></div>
-                  <p className="font-bold text-slate-900 mt-3 px-3 text-sm sm:text-base leading-snug break-words">{x.nom}</p>
-                  <p className="text-xs sm:text-sm mt-1 px-3 font-medium text-orange-600">{x.intitule}</p>
-                  <p className="text-xs text-slate-400 px-3 pb-4 min-h-[1.25rem]">{x.promo ? `Promo ${x.promo}` : ""}</p>
-                </div>
-              ))}
+          <div key={d} className="mt-3">
+            <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400 px-2 mb-1">{d}</p>
+            <div className={unique ? "grid sm:grid-cols-2 lg:grid-cols-3 gap-x-2" : ""}>
+              {trier(parDept[d]).map((x, i) => <Ligne key={i} x={x} />)}
             </div>
           </div>
         ))}
       </div>
-      <p className="text-xs text-slate-400 mt-8">Liste établie à partir des postes déclarés par les anciens dans leur espace.</p>
-    </section>
+    );
+  };
+
+  return (
+    <>
+      <PageHero kicker="Notre histoire" title="Les anciens bureaux" sub="Choisissez les mandats que vous voulez voir, comparez-les, ou cherchez une personne pour suivre son parcours." icon={HistoryIcon} />
+      <main className="max-w-6xl mx-auto px-4 py-10 space-y-6">
+        <button onClick={() => go("bureau")} className="inline-flex items-center gap-1 text-sm font-semibold text-orange-600 hover:gap-2 transition-all"><ChevronLeft size={16} /> Le bureau actuel</button>
+
+        {!liste.length ? (
+          <div className="bg-white rounded-2xl border border-slate-200 p-10 text-center text-slate-500">
+            <HistoryIcon size={32} className="mx-auto text-slate-300 mb-3" />
+            <p className="font-semibold text-slate-700">Aucun ancien bureau pour le moment</p>
+            <p className="text-sm mt-1">Les mandats apparaissent ici dès que des anciens déclarent leurs postes dans leur espace.</p>
+          </div>
+        ) : (
+          <>
+            {/* Outils : recherche + frise */}
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 sm:p-5">
+              <div className="flex flex-col sm:flex-row gap-3 sm:items-center">
+                <label className="relative flex-1">
+                  <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Chercher un ancien, un poste, une promo…" className="w-full pl-9 pr-9 py-2.5 rounded-xl border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500" />
+                  {q && <button onClick={() => setQ("")} aria-label="Effacer la recherche" className="absolute right-2 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full text-slate-400 hover:bg-slate-100 flex items-center justify-center"><X size={14} /></button>}
+                </label>
+                <div className="flex items-center gap-2 text-xs font-semibold">
+                  <button onClick={() => setSel(liste.map((m) => m.k))} className="px-3 py-2 rounded-lg bg-slate-100 text-slate-600 hover:bg-slate-200">Tout afficher</button>
+                  <button onClick={() => setSel([])} className="px-3 py-2 rounded-lg bg-slate-100 text-slate-600 hover:bg-slate-200">Tout masquer</button>
+                </div>
+              </div>
+
+              <div className={`mt-4 transition ${nq ? "opacity-40 pointer-events-none" : ""}`}>
+                <p className="text-xs text-slate-500 mb-1">{liste.length} mandat{liste.length > 1 ? "s" : ""} · {total} ancien{total > 1 ? "s" : ""} membre{total > 1 ? "s" : ""}. Touchez plusieurs points de la frise pour les comparer.</p>
+                <div ref={frise} className="profile-space-tabs overflow-x-auto pb-2">
+                  <div className="relative flex gap-1 w-max min-w-full pt-3">
+                    <span className="absolute left-4 right-4 top-[19px] h-0.5 bg-slate-200 rounded-full" />
+                    {[...liste].reverse().map((m) => {
+                      const on = !nq && actifs.includes(m.k);
+                      return (
+                        <button key={m.k} onClick={() => bascule(m.k)} aria-pressed={on} className="relative flex flex-col items-center min-w-[76px] px-1 group">
+                          <span className={`w-4 h-4 rounded-full border-2 transition ${on ? "bg-orange-600 border-orange-600 scale-125 shadow" : "bg-white border-slate-300 group-hover:border-orange-400"}`} />
+                          <span className={`mt-2 text-xs font-bold whitespace-nowrap ${on ? "text-orange-700" : "text-slate-600"}`}>{m.k}</span>
+                          <span className="text-[10px] text-slate-400">{m.gens.length} pers.</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Parcours d'une personne */}
+            {parcours && (
+              <div className="rounded-2xl p-4 sm:p-5 text-white shadow-lg" style={{ background: NAVY }}>
+                <div className="flex items-center justify-between gap-3">
+                  <p className="font-bold">Parcours de {noms[0]}</p>
+                  <button onClick={() => setQ("")} className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-white bg-opacity-10 hover:bg-opacity-20">Revenir à la frise</button>
+                </div>
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  {parcours.map((p, i) => (
+                    <React.Fragment key={i}>
+                      {i > 0 && <ArrowRight size={14} className="text-orange-400" />}
+                      <span className="px-3 py-1.5 rounded-xl bg-white bg-opacity-10 text-sm"><span className="font-bold text-orange-300">{p.k}</span> · {libellePoste(p)}</span>
+                    </React.Fragment>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Mandats choisis */}
+            {montres.length === 0 ? (
+              <div className="bg-white rounded-2xl border border-slate-200 p-8 text-center text-slate-500 text-sm">
+                {nq ? <>Aucun résultat pour « {q} ».</> : "Aucun mandat sélectionné : touchez un point de la frise."}
+              </div>
+            ) : (
+              <div className={unique ? "max-w-4xl" : "grid md:grid-cols-2 xl:grid-cols-3 gap-4 items-start"}>
+                {montres.map((m) => <Carte key={m.k} m={m} />)}
+              </div>
+            )}
+            <p className="text-xs text-slate-400">Liste établie à partir des postes déclarés par les anciens dans leur espace. Touchez un nom pour voir son parcours.</p>
+          </>
+        )}
+      </main>
+    </>
   );
 }
 
