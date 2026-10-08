@@ -3331,7 +3331,7 @@ function PrivacyPage({ go }) {
       <PageHero kicker="Vos données" title="Politique de confidentialité" sub="Quelles informations nous collectons, pourquoi, et comment vous gardez la main dessus." icon={KeyRound} />
       <main className="max-w-3xl mx-auto px-4 py-12 -mt-10 relative">
         <div className="bg-white rounded-3xl shadow-xl p-6 sm:p-10">
-          <P>Ce site est celui de la CGE ARSTM, section ARSTM de la Conférence des Grandes Écoles de Côte d'Ivoire. Il est géré par des élèves bénévoles du bureau. Dernière mise à jour : {new Date().toLocaleDateString("fr-FR", { month: "long", year: "numeric" })}.</P>
+          <P>Ce site est celui de la CGE ARSTM, section ARSTM de la Conférence des Grandes Écoles de Côte d'Ivoire. Il est géré par des élèves bénévoles du bureau. Dernière mise à jour : octobre 2026.</P>
 
           <H>1. Les informations que nous collectons</H>
           <ul className="list-disc pl-5 space-y-1.5 mb-3">
@@ -4273,8 +4273,8 @@ function LoginModal({ onClose, onLogin, onRegister, onForgot }) {
   // Validation stricte de l'inscription : aucun champ incomplet ou incohérent
   // ne peut être envoyé. Les mêmes règles sont réutilisées au clic sur le bouton.
   const REG_RULES = {
-    prenoms: /^[A-Za-zÀ-ÖØ-öø-ÿ]+(?:[\s'-][A-Za-zÀ-ÖØ-öø-ÿ]+)*$/,
-    nom: /^[A-Za-zÀ-ÖØ-öø-ÿ]+(?:[\s'-][A-Za-zÀ-ÖØ-öø-ÿ]+)*$/,
+    prenoms: /^[A-Za-zÀ-ÖØ-öø-ÿ]+(?:[\s'’-]+[A-Za-zÀ-ÖØ-öø-ÿ]+)*$/,
+    nom: /^[A-Za-zÀ-ÖØ-öø-ÿ]+(?:[\s'’-]+[A-Za-zÀ-ÖØ-öø-ÿ]+)*$/,
     matricule: /^\d{4}-\d{4}$/,
     email: EMAIL_RE,
     promotion: /^\d{1,3}$/,
@@ -4286,7 +4286,7 @@ function LoginModal({ onClose, onLogin, onRegister, onForgot }) {
     if (k === "matricule" && type === "ancien" && !v) return true;
     if (["prenoms", "nom", "matricule", "email", "filiere", "promotion", "password", "confirm"].includes(k) && !v) return false;
     if (REG_RULES[k] && !REG_RULES[k].test(v)) return false;
-    if (k === "confirm" && v !== reg.password) return false;
+    if (k === "confirm" && String(value ?? "") !== reg.password) return false;
     return true;
   };
   const regAllValid = (r = reg) => {
@@ -4317,7 +4317,7 @@ function LoginModal({ onClose, onLogin, onRegister, onForgot }) {
     const r = { ...reg, prenoms: reg.prenoms.trim(), nom: reg.nom.trim(), matricule: reg.matricule.trim(), email: reg.email.trim(), promotion: reg.promotion.trim() };
     const required = ["prenoms", "nom", "matricule", "email", "filiere", "promotion", "password", "confirm"];
     setRegTouched((t) => ({ ...t, ...Object.fromEntries(required.map((k) => [k, true])), ...(r.type === "ancien" ? { cge_ancien: true } : {}) }));
-    if (!regAllValid(r)) return setErr("Champ mal rempli");
+    if (!regAllValid(r)) return setErr("Certains champs sont mal remplis : ils sont signalés en rouge.");
     const e = await onRegister(r);
     if (e) return setErr(e);
     setEmail(r.email); setPwd(""); setReg(EMPTY_REG); setRegTouched({}); setMode("done");
@@ -4407,7 +4407,7 @@ function LoginModal({ onClose, onLogin, onRegister, onForgot }) {
           {regField("Mot de passe (8 caractères min.)", "password", "password")}
           {regField("Confirmer le mot de passe", "confirm", "password")}
           {err && <p className="text-sm text-rose-600 font-semibold">{err}</p>}
-          <button onClick={register} disabled={busy || !regAllValid()} className={btn}><UserPlus size={18} /> {busy ? "Envoi..." : "Envoyer ma demande"}</button>
+          <button onClick={register} disabled={busy} className={btn}><UserPlus size={18} /> {busy ? "Envoi..." : "Envoyer ma demande"}</button>
           <p className="text-xs text-slate-500 text-center">Exemples : matricule <strong>2024-1234</strong> · promotion <strong>38</strong> · mot de passe <strong>8 caractères minimum</strong>.</p>
         </div>
       )}
@@ -4474,6 +4474,7 @@ function NewPasswordModal({ onClose, notify }) {
 // =====================================================================
 // Champs des formulaires : k = nom, type = text/date/url/select/textarea/checkbox/image/file,
 // optional = facultatif, showIf = n'afficher le champ que dans certains cas.
+const optsOf = (f) => (typeof f.opts === "function" ? f.opts() : f.opts);
 const ADMIN_SECTIONS = {
   news: {
     table: "news", fromDb: newsFromDb, toDb: newsToDb, label: "Actualités", icon: Newspaper,
@@ -4504,7 +4505,7 @@ const ADMIN_SECTIONS = {
       { k: "title", label: "Intitulé", placeholder: "ex. Stage mécanicien — XYZ Marine" },
       { k: "type", label: "Type", type: "select", opts: JOB_TYPES },
       { k: "company", label: "Entreprise / organisme", optional: true },
-      { k: "domaine", label: "Domaine", type: "select", opts: ["", ...DOMAINES] },
+      { k: "domaine", label: "Domaine", type: "select", opts: () => ["", ...DOMAINES] },
       { k: "zone", label: "Zone", type: "select", opts: ZONES },
       { k: "place", label: "Lieu précis", optional: true, placeholder: "ex. Abidjan, Port autonome" },
       { k: "niveau", label: "Niveau requis", optional: true, placeholder: "ex. L2 / L3" },
@@ -7425,7 +7426,7 @@ function AdminPanel({ news, setNews, events, setEvents, jobs, setJobs, alumni, s
     if (badUrl) return notify(`Le champ « ${badUrl.label} » doit commencer par https://`, "error");
     const custom = cfg.validate && cfg.validate(form);
     if (custom) return notify(custom, "error");
-    const defaults = {}; cfg.fields.forEach((f) => { if (f.type === "select") defaults[f.k] = f.opts[0]; });
+    const defaults = {}; cfg.fields.forEach((f) => { if (f.type === "select") defaults[f.k] = optsOf(f)[0]; });
     const payload = cfg.toDb({ ...defaults, ...form });
     setSaving(true);
     const query = editingId ? sb.from(cfg.table).update(payload).eq("id", editingId) : sb.from(cfg.table).insert(payload);
@@ -7532,7 +7533,7 @@ function AdminPanel({ news, setNews, events, setEvents, jobs, setJobs, alumni, s
     if (f.type === "drive") return <DriveUploadField key={f.k} label={lab} setForm={setForm} notify={notify} />;
     const onChange = (e) => setForm({ ...form, [f.k]: f.type === "checkbox" ? e.target.checked : e.target.value });
     if (f.type === "checkbox") return <label key={f.k} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={!!val} onChange={onChange} className="w-4 h-4 accent-orange-600" /> {f.label}</label>;
-    if (f.type === "select") return <label key={f.k} className="block">{lab}<select value={val ?? f.opts[0]} onChange={onChange} className={inputCls}>{f.opts.map((o) => <option key={o} value={o}>{(f.labels && f.labels[o]) || o || "— Non précisé —"}</option>)}</select></label>;
+    if (f.type === "select") return <label key={f.k} className="block">{lab}<select value={val ?? optsOf(f)[0]} onChange={onChange} className={inputCls}>{optsOf(f).map((o) => <option key={o} value={o}>{(f.labels && f.labels[o]) || o || "— Non précisé —"}</option>)}</select></label>;
     if (f.type === "textarea") return <label key={f.k} className="block">{lab}<textarea rows={f.k === "texte" ? 6 : 3} value={val ?? ""} onChange={onChange} placeholder={f.placeholder} className={inputCls} /></label>;
     return <label key={f.k} className="block">{lab}<input type={f.type === "url" ? "url" : f.type || "text"} value={val ?? ""} onChange={onChange} placeholder={f.placeholder} className={inputCls} /></label>;
   };
