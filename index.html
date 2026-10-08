@@ -5681,28 +5681,59 @@ function RightsManager({ members, updateMember }) {
 // =====================================================================
 // JOURNAL & CONNEXIONS (administrateurs uniquement)
 // =====================================================================
-function ActivityLog({ members }) {
+function ActivityLog({ members, notify }) {
+  const dayKey = (iso) => { const d = new Date(iso); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
+  const today = dayKey(new Date().toISOString());
+  const bounds = (k) => { const s = new Date(k + "T00:00:00"); const e = new Date(s); e.setDate(e.getDate() + 1); return [s.toISOString(), e.toISOString()]; };
   const [rows, setRows] = useState(null);
   const [presence, setPresence] = useState([]);
+  const [days, setDays] = useState([]);
   const [err, setErr] = useState("");
   const [limit, setLimit] = useState(300);
+  const [day, setDay] = useState(today);
   const [who, setWho] = useState("");
   const [act, setAct] = useState("");
   const [q, setQ] = useState("");
   const [allVisits, setAllVisits] = useState(false);
-  const load = async (n) => {
-    const [j, p] = await Promise.all([
-      sb.from("journal").select("*").order("created_at", { ascending: false }).limit(n),
+  const [busy, setBusy] = useState(false);
+  const load = async () => {
+    let jq = sb.from("journal").select("*").order("created_at", { ascending: false });
+    if (day) { const [s, e] = bounds(day); jq = jq.gte("created_at", s).lt("created_at", e).limit(3000); } else jq = jq.limit(limit);
+    const [j, p, d] = await Promise.all([
+      jq,
       sb.from("presence").select("*"),
+      sb.from("journal").select("created_at").order("created_at", { ascending: false }).limit(20000),
     ]);
     if (j.error) { setErr(j.error.message); setRows([]); return; }
     setErr(""); setRows(j.data || []); setPresence(p.data || []);
+    const count = {};
+    (d.data || []).forEach((r) => { const k = dayKey(r.created_at); count[k] = (count[k] || 0) + 1; });
+    setDays(Object.entries(count).sort((a, b) => b[0].localeCompare(a[0])));
   };
   useEffect(() => {
-    load(limit);
-    const timer = setInterval(() => load(limit), 60000);
-    return () => clearInterval(timer);
-  }, [limit]);
+    let off = false;
+    const run = () => { if (!off) load(); };
+    run();
+    const timer = setInterval(run, 60000);
+    return () => { off = true; clearInterval(timer); };
+  }, [day, limit]);
+
+  // Suppression d'une période : jamais sans borne haute, pour ne pas vider tout le journal par erreur.
+  const purge = async (from, to, okMsg) => {
+    setBusy(true);
+    let dq = sb.from("journal").delete();
+    if (from) dq = dq.gte("created_at", from);
+    const { data, error } = await dq.lt("created_at", to).select("id");
+    setBusy(false);
+    if (error) return notify("Suppression impossible : " + error.message, "error");
+    if (!data || data.length === 0) return notify("Rien n'a été supprimé. Si des actions existent, lancez le script SQL de suppression du journal dans Supabase (voir les explications).", "error");
+    notify(`${data.length} ligne${data.length > 1 ? "s" : ""} supprimée${data.length > 1 ? "s" : ""}. ${okMsg}`);
+    load();
+  };
+  const purgeDay = (k) => { const [s, e] = bounds(k); purge(s, e, fmtDate(k) + " effacé."); };
+  const purgeOlder = (n, label) => { const c = new Date(); c.setDate(c.getDate() - n); purge(null, c.toISOString(), `Tout ce qui date de plus de ${label} est effacé.`); };
+  const shift = (n) => { const d = new Date((day || today) + "T12:00:00"); d.setDate(d.getDate() + n); setDay(dayKey(d.toISOString())); };
+  const yesterday = (() => { const d = new Date(); d.setDate(d.getDate() - 1); return dayKey(d.toISOString()); })();
 
   const byId = Object.fromEntries(members.map((m) => [m.id, m]));
   const isOnline = (p) => p.last_seen && Date.now() - new Date(p.last_seen) < 5 * 60000;
@@ -5712,6 +5743,8 @@ function ActivityLog({ members }) {
   const people = [...new Set((rows || []).map((r) => r.user_nom).filter(Boolean))].sort();
   const shown = (rows || []).filter((r) => (!who || r.user_nom === who) && (!act || r.action === act)
     && (!q || [label(r), r.details, RUBRIQUES[r.rubrique], r.user_nom].join(" ").toLowerCase().includes(q.toLowerCase())));
+  const totalLines = days.reduce((s, [, n]) => s + n, 0);
+  const chip = (on) => `px-3 py-2 rounded-xl text-xs font-semibold border transition ${on ? "bg-orange-600 border-orange-600 text-white" : "bg-white border-slate-300 text-slate-600 hover:text-orange-600"}`;
 
   if (rows === null) return <p className="text-slate-500">Chargement du journal...</p>;
   if (err) return <div className="rounded-2xl bg-rose-50 border border-rose-200 p-5 text-sm text-rose-800">Journal indisponible : {err}. Vérifiez que le script SQL « lot 4 » a bien été lancé dans Supabase.</div>;
@@ -5719,7 +5752,7 @@ function ActivityLog({ members }) {
     <div className="space-y-6">
       <div className="rounded-2xl bg-sky-50 border border-sky-200 p-5 flex gap-3 text-sm text-sky-900">
         <Info size={20} className="flex-shrink-0 text-sky-600 mt-0.5" />
-        <p>Visible uniquement par les administrateurs. Une « connexion » est notée quand un membre arrive sur le site après plus de 30 minutes d'absence. L'historique est conservé 6 mois et se met à jour chaque minute.</p>
+        <p>Visible uniquement par les administrateurs. Une « connexion » est notée quand un membre arrive sur le site après plus de 30 minutes d'absence. Choisissez un jour pour l'inspecter, et supprimez les jours dont vous n'avez plus besoin pour garder la base légère.</p>
       </div>
       <div className="grid lg:grid-cols-2 gap-6">
         <Panel title={`En ligne maintenant (${online.length})`} Icon={Users}>
@@ -5753,7 +5786,23 @@ function ActivityLog({ members }) {
           <p className="text-xs text-slate-400 mt-3">Les membres qui ne sont pas venus depuis la mise en place du journal n'apparaissent pas encore.</p>
         </Panel>
       </div>
-      <Panel title="Journal des actions" Icon={HistoryIcon} action={<button onClick={() => load(limit)} className="px-3 py-2 rounded-xl bg-white border border-slate-300 text-xs font-semibold text-slate-600 hover:text-orange-600 flex items-center gap-1"><RotateCcw size={14} /> Actualiser</button>}>
+
+      <Panel title="Journal des actions" Icon={HistoryIcon} action={<button onClick={() => load()} className="px-3 py-2 rounded-xl bg-white border border-slate-300 text-xs font-semibold text-slate-600 hover:text-orange-600 flex items-center gap-1"><RotateCcw size={14} /> Actualiser</button>}>
+        {/* Choix du jour */}
+        <div className="flex flex-wrap items-center gap-2 mb-4">
+          <button onClick={() => shift(-1)} className="w-10 h-10 rounded-xl bg-white border border-slate-300 text-slate-600 hover:text-orange-600 flex items-center justify-center" aria-label="Jour précédent"><ChevronLeft size={18} /></button>
+          <input type="date" value={day} max={today} onChange={(e) => setDay(e.target.value)} className={inputCls + " mt-0 w-auto"} aria-label="Choisir le jour à inspecter" />
+          <button onClick={() => shift(1)} disabled={!day || day >= today} className="w-10 h-10 rounded-xl bg-white border border-slate-300 text-slate-600 hover:text-orange-600 disabled:opacity-40 flex items-center justify-center" aria-label="Jour suivant"><ChevronRight size={18} /></button>
+          <button onClick={() => setDay(today)} className={chip(day === today)}>Aujourd'hui</button>
+          <button onClick={() => setDay(yesterday)} className={chip(day === yesterday)}>Hier</button>
+          <button onClick={() => setDay("")} className={chip(!day)}>Tous les jours</button>
+        </div>
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-4 rounded-xl bg-slate-50 border border-slate-200 px-4 py-2.5">
+          <p className="text-sm text-slate-700 font-semibold">
+            {day ? <>{fmtDate(day)}{day === today && " (aujourd'hui)"} · </> : "Dernières actions · "}{shown.length} action{shown.length > 1 ? "s" : ""}
+          </p>
+          {day && rows.length > 0 && <ConfirmButton onConfirm={() => purgeDay(day)} confirmLabel="Supprimer ce jour ?" ariaLabel="Supprimer tout ce jour" className="px-3 py-1.5 rounded-lg text-xs font-semibold text-rose-600 hover:bg-rose-50 flex items-center gap-1"><Trash2 size={14} /> Supprimer ce jour</ConfirmButton>}
+        </div>
         <div className="grid sm:grid-cols-3 gap-2 mb-4">
           <select value={who} onChange={(e) => setWho(e.target.value)} className={inputCls + " mt-0"}>
             <option value="">Toutes les personnes</option>{people.map((n) => <option key={n}>{n}</option>)}
@@ -5766,11 +5815,11 @@ function ActivityLog({ members }) {
             <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Rechercher..." className={inputCls + " mt-0 pl-10"} />
           </div>
         </div>
-        {shown.length === 0 ? <p className="text-sm text-slate-500">Aucune action ne correspond.</p> : (
+        {shown.length === 0 ? <p className="text-sm text-slate-500">{day ? "Aucune action enregistrée ce jour-là." : "Aucune action ne correspond."}</p> : (
           <ul className="divide-y divide-slate-100">
             {shown.map((r) => { const [al, ac] = ACTIONS[r.action] || [r.action, "bg-slate-100 text-slate-600"]; const obj = label(r); return (
               <li key={r.id} className="py-3 flex flex-col sm:flex-row sm:items-start gap-1.5 sm:gap-4 text-sm">
-                <span className="text-xs text-slate-500 sm:w-40 flex-shrink-0 sm:pt-0.5">{fmtDateTime(r.created_at)}</span>
+                <span className="text-xs text-slate-500 sm:w-40 flex-shrink-0 sm:pt-0.5">{day ? new Date(r.created_at).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }) : fmtDateTime(r.created_at)}</span>
                 <span className={`self-start text-xs px-2 py-0.5 rounded-full font-semibold whitespace-nowrap ${ac}`}>{al}</span>
                 <span className="flex-1 min-w-0 text-slate-700">
                   <strong className="text-slate-900">{r.user_nom || "Inconnu"}</strong>
@@ -5781,7 +5830,29 @@ function ActivityLog({ members }) {
             ); })}
           </ul>
         )}
-        {rows.length >= limit && <button onClick={() => setLimit(limit + 300)} className="mt-4 text-sm text-orange-600 font-semibold">Charger les actions plus anciennes</button>}
+        {!day && rows.length >= limit && <button onClick={() => setLimit(limit + 300)} className="mt-4 text-sm text-orange-600 font-semibold">Charger les actions plus anciennes</button>}
+      </Panel>
+
+      <Panel title={`Jours enregistrés (${days.length})`} Icon={Calendar}>
+        <p className="text-sm text-slate-500 mb-4">{totalLines} ligne{totalLines > 1 ? "s" : ""} au total dans le journal. Cliquez sur un jour pour l'inspecter, ou supprimez-le quand il ne sert plus.</p>
+        <div className="flex flex-wrap items-center gap-2 mb-4">
+          <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Nettoyer :</span>
+          {[[30, "30 jours", "Plus de 30 jours"], [90, "3 mois", "Plus de 3 mois"], [180, "6 mois", "Plus de 6 mois"]].map(([n, lab, btnLab]) => (
+            <ConfirmButton key={n} onConfirm={() => purgeOlder(n, lab)} confirmLabel={`Effacer > ${lab} ?`} className="px-3 py-2 rounded-xl text-xs font-semibold border border-slate-300 bg-white text-slate-600 hover:text-rose-600 hover:border-rose-300">{btnLab}</ConfirmButton>
+          ))}
+        </div>
+        {days.length === 0 ? <p className="text-sm text-slate-500">Le journal est vide.</p> : (
+          <ul className="divide-y divide-slate-100 max-h-72 overflow-y-auto rounded-xl border border-slate-200">
+            {days.map(([k, n]) => (
+              <li key={k} className={`flex items-center gap-2 px-3 py-2 text-sm ${k === day ? "bg-orange-50" : ""}`}>
+                <button onClick={() => setDay(k)} className="flex-1 min-w-0 text-left font-semibold text-slate-800 hover:text-orange-600 truncate">{fmtDate(k)}{k === today && <span className="ml-2 text-xs text-orange-600">aujourd'hui</span>}</button>
+                <span className="text-xs text-slate-500 whitespace-nowrap">{n} action{n > 1 ? "s" : ""}</span>
+                <ConfirmButton onConfirm={() => purgeDay(k)} confirmLabel="Supprimer ?" ariaLabel={`Supprimer le ${fmtDate(k)}`} className="p-2 rounded-lg text-rose-600 hover:bg-rose-50"><Trash2 size={15} /></ConfirmButton>
+              </li>
+            ))}
+          </ul>
+        )}
+        {busy && <p className="text-xs text-slate-500 mt-3">Suppression en cours...</p>}
       </Panel>
     </div>
   );
@@ -7492,7 +7563,7 @@ function AdminPanel({ news, setNews, events, setEvents, jobs, setJobs, alumni, s
       {tab === "sondages" && <AdminPolls sondages={sondages} setSondages={setSondages} countsFor={countsFor} notify={notify} />}
       {tab === "reglages" && <SettingsManager settings={settings} saveSettings={saveSettings} notify={notify} />}
       {tab === "droits" && <RightsManager members={members} updateMember={updateMember} />}
-      {tab === "journal" && <ActivityLog members={members} />}
+      {tab === "journal" && <ActivityLog members={members} notify={notify} />}
       {tab === "adhesions" && <AdminAdhesions can={can} notify={notify} />}
       {tab === "finances" && <AdminFinances can={can} notify={notify} />}
       {tab === "communication" && <AdminCommunication notify={notify} />}
