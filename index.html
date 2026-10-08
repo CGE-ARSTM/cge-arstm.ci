@@ -231,6 +231,8 @@ const DEFAULTS = {
   MANDAT: CFG.MANDAT || "",
   PRESIDENT: { name: "", message: "", ...(CFG.PRESIDENT || {}) },
   BUREAU: CFG.BUREAU || [],
+  // Anciens bureaux archivés à la fin de chaque mandat : [{ mandat, president, bureau }]
+  ARCHIVES_BUREAUX: [],
   CONTACT: { adresse: "", email: "", telephone: "", facebook: "", ...(CFG.CONTACT || {}) },
   ANNEE_CREATION: Number(CFG.ANNEE_CREATION) || 1992,
   FILIERES: CFG.FILIERES || [],
@@ -248,6 +250,7 @@ let TEXTES = {};
 const PRESIDENT = copy(DEFAULTS.PRESIDENT);
 const CONTACT = copy(DEFAULTS.CONTACT);
 const BUREAU = copy(DEFAULTS.BUREAU);
+const ARCHIVES_BUREAUX = copy(DEFAULTS.ARCHIVES_BUREAUX);
 const FILIERES = [...DEFAULTS.FILIERES];
 const DOMAINES = [...DEFAULTS.DOMAINES];
 const ZONES = [...DEFAULTS.ZONES];
@@ -266,12 +269,13 @@ const applySettings = (settings) => {
   fillObject(PRESIDENT, { ...DEFAULTS.PRESIDENT, ...pick("PRESIDENT") });
   fillObject(CONTACT, { ...DEFAULTS.CONTACT, ...pick("CONTACT") });
   fillArray(BUREAU, copy(pick("BUREAU")));
+  fillArray(ARCHIVES_BUREAUX, copy(pick("ARCHIVES_BUREAUX")));
   [["FILIERES", FILIERES], ["DOMAINES", DOMAINES], ["ZONES", ZONES], ["NEWS_CATEGORIES", NEWS_CATEGORIES], ["DOC_CATEGORIES", DOC_CATEGORIES], ["DEPARTEMENTS", DEPARTEMENTS]]
     .forEach(([k, arr]) => fillArray(arr, pick(k)));
   TEXTES = Object.fromEntries(Object.entries(settings).filter(([k]) => k.startsWith("texte:")).map(([k, v]) => [k.slice(6), v]));
 };
 const SETTING_LABELS = {
-  MANDAT: "Mandat du bureau", PRESIDENT: "Président et son mot", BUREAU: "Bureau exécutif", CONTACT: "Coordonnées",
+  MANDAT: "Mandat du bureau", PRESIDENT: "Président et son mot", BUREAU: "Bureau exécutif", ARCHIVES_BUREAUX: "Anciens bureaux archivés", CONTACT: "Coordonnées",
   ANNEE_CREATION: "Année de création", FILIERES: "Filières", DOMAINES: "Domaines des opportunités", ZONES: "Zones des opportunités",
   NEWS_CATEGORIES: "Catégories d'actualités", DOC_CATEGORIES: "Catégories de documents", DEPARTEMENTS: "Départements de la CGE",
 };
@@ -2049,6 +2053,13 @@ function PostesAdminDialog({ m, onClose, onSave }) {
 const normaliser = (s) => String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
 const estPresidentPoste = (x) => /^pr[ée]sident/i.test(String(x.intitule || "").trim()) && !/vice/i.test(String(x.intitule || ""));
 
+const cleNom = (n) => normaliser(n).split(/\s+/).filter(Boolean).sort().join(" ");
+// « 2026-2027 » ou « 2026 » : même forme que la période des postes déclarés.
+const periodeDe = (mandat) => {
+  const a = String(mandat || "").match(/\d{4}/g) || [];
+  const debut = a[0] || "", fin = a[1] || a[0] || "";
+  return { k: debut ? (fin && fin !== debut ? `${debut}-${fin}` : debut) : String(mandat || "").trim(), debut, fin };
+};
 // Regroupe les postes déclarés par les anciens en mandats (du plus récent au plus ancien).
 function mandatsAnciens(postes) {
   const groupes = {};
@@ -2058,6 +2069,20 @@ function mandatsAnciens(postes) {
     if (!groupes[k]) groupes[k] = { k, debut: p.debut || "", fin: p.fin || p.debut || "", gens: [] };
     groupes[k].gens.push({ nom: a.nom, photo: a.photo, promo: a.promotion, intitule: p.intitule, departement: p.departement });
   }));
+  // Bureaux archivés par l'administration à la fin d'un mandat (Administration → Textes, bureau & images).
+  (ARCHIVES_BUREAUX || []).forEach((a) => {
+    const { k, debut, fin } = periodeDe(a.mandat);
+    if (!k) return;
+    if (!groupes[k]) groupes[k] = { k, debut, fin, gens: [] };
+    const g = groupes[k];
+    const membres = (a.bureau || []).flatMap((d) => (d.members || []).map((m) => ({ nom: String((m && m[0]) || "").trim(), intitule: String((m && m[1]) || "").trim() || "Membre", departement: d.dept })));
+    if (a.president && !membres.some((x) => cleNom(x.nom) === cleNom(a.president))) membres.unshift({ nom: String(a.president).trim(), intitule: "Président", departement: "" });
+    membres.filter((x) => x.nom).forEach((x) => {
+      const deja = g.gens.find((y) => cleNom(y.nom) === cleNom(x.nom));   // déjà déclaré par la personne : pas de doublon
+      if (deja) { if (!deja.departement) deja.departement = x.departement; return; }
+      g.gens.push({ ...x, photo: "", promo: "" });
+    });
+  });
   return Object.values(groupes).sort((a, b) => b.debut.localeCompare(a.debut) || b.fin.localeCompare(a.fin));
 }
 
@@ -2084,6 +2109,7 @@ function AnciensBureauxPage({ postes, go }) {
   const [sel, setSel] = useState(null);      // null = le mandat le plus récent
   const [q, setQ] = useState("");
   const [vue, setVue] = useState("liste");   // « liste » ou « colonnes » (côte à côte)
+  const images = useImages();
   const frise = useRef(null);
   useEffect(() => { if (frise.current) frise.current.scrollLeft = frise.current.scrollWidth; }, [liste.length]);
 
@@ -2105,7 +2131,7 @@ function AnciensBureauxPage({ postes, go }) {
   // Une personne : petite photo en gris (elle reprend ses couleurs au survol), nom, poste.
   const ligne = (x, i, pres) => (
     <button key={i} onClick={() => choisir(x.nom)} title="Voir tout son parcours" className="group w-full flex items-center gap-2.5 px-2 py-1.5 rounded-lg text-left hover:bg-slate-50 transition">
-      <span className="grayscale group-hover:grayscale-0 transition flex-shrink-0 rounded-full"><Avatar photo={x.photo} name={x.nom} size={pres ? "w-10 h-10" : "w-8 h-8"} text="text-xs" /></span>
+      <span className="grayscale group-hover:grayscale-0 transition flex-shrink-0 rounded-full"><Avatar photo={x.photo || images[`membre:${x.nom}`]} name={x.nom} size={pres ? "w-10 h-10" : "w-8 h-8"} text="text-xs" /></span>
       <span className="min-w-0 flex-1">
         <span className={`block truncate text-slate-900 group-hover:underline ${pres ? "text-base font-semibold" : "text-sm font-medium"}`}>{x.nom}</span>
         <span className="block text-xs text-slate-500 truncate">{x.intitule}{x.promo ? ` · Promo ${x.promo}` : ""}</span>
@@ -5335,6 +5361,27 @@ function SettingsManager({ settings, saveSettings, notify }) {
 function BureauSettings({ cur, change, commit, resetKeys, notify }) {
   const [s, setS] = useState(() => ({ mandat: cur("MANDAT"), pres: cur("PRESIDENT"), bureau: cur("BUREAU") }));
   const [busy, setBusy] = useState(false);
+  const [arch, setArch] = useState(() => cur("ARCHIVES_BUREAUX"));
+  const [archiverAuto, setArchiverAuto] = useState(true);
+  const mandatChange = !!String(MANDAT || "").trim() && String(s.mandat).trim() !== String(MANDAT).trim();
+  // Le bureau en ligne en ce moment, à ranger dans l'historique.
+  const archiveActuelle = () => ({ mandat: String(MANDAT || "").trim(), president: String(PRESIDENT.name || "").trim(), bureau: copy(BUREAU) });
+  const avecArchive = (list, a) => [...list.filter((x) => periodeDe(x.mandat).k !== periodeDe(a.mandat).k), a];
+  const archiverMaintenant = async () => {
+    if (!String(MANDAT || "").trim() || !BUREAU.length) return notify("Aucun bureau en ligne à archiver.", "error");
+    const next = avecArchive(arch, archiveActuelle());
+    setBusy(true);
+    const ok = await commit([change("ARCHIVES_BUREAUX", next, DEFAULTS.ARCHIVES_BUREAUX)], `Bureau ${MANDAT} ajouté aux anciens bureaux.`);
+    setBusy(false);
+    if (ok) setArch(next);
+  };
+  const retirerArchive = async (mandat) => {
+    const next = arch.filter((x) => x.mandat !== mandat);
+    setBusy(true);
+    const ok = await commit([change("ARCHIVES_BUREAUX", next, DEFAULTS.ARCHIVES_BUREAUX)], `Mandat ${mandat} retiré des anciens bureaux.`);
+    setBusy(false);
+    if (ok) setArch(next);
+  };
   const setBureau = (fn) => setS((x) => ({ ...x, bureau: fn(x.bureau) }));
   const editDept = (i, fn) => setBureau((b) => b.map((d, j) => (j === i ? fn(d) : d)));
   const setMember = (i, j, pos, v) => editDept(i, (d) => ({ ...d, members: d.members.map((m, y) => (y !== j ? m : pos === 0 ? [v, m[1], m[2]] : pos === 1 ? [m[0], v, m[2]] : [m[0], m[1], v])) }));
@@ -5347,9 +5394,12 @@ function BureauSettings({ cur, change, commit, resetKeys, notify }) {
     const pres = { name: String(s.pres.name || "").trim(), message: String(s.pres.message || "").trim() };
     if (!pres.name) return notify("Indiquez le nom du président.", "error");
     if (!bureau.length) return notify("Le bureau doit contenir au moins un département avec un membre.", "error");
+    // Changement de mandat : l'ancien bureau part dans « Les anciens bureaux » (case cochée par défaut).
+    const nextArch = archiverAuto && mandatChange && BUREAU.length ? avecArchive(arch, archiveActuelle()) : arch;
     setBusy(true);
-    await commit([change("MANDAT", String(s.mandat).trim(), DEFAULTS.MANDAT), change("PRESIDENT", pres, DEFAULTS.PRESIDENT), change("BUREAU", bureau, DEFAULTS.BUREAU)], "Bureau et président enregistrés.");
+    const ok = await commit([change("MANDAT", String(s.mandat).trim(), DEFAULTS.MANDAT), change("PRESIDENT", pres, DEFAULTS.PRESIDENT), change("BUREAU", bureau, DEFAULTS.BUREAU), change("ARCHIVES_BUREAUX", nextArch, DEFAULTS.ARCHIVES_BUREAUX)], "Bureau et président enregistrés.");
     setBusy(false);
+    if (ok) setArch(nextArch);
   };
   const reset = async () => {
     setBusy(true);
@@ -5395,6 +5445,26 @@ function BureauSettings({ cur, change, commit, resetKeys, notify }) {
             </div>
           ))}
         </div>
+      </Panel>
+      <Panel title="Historique des mandats" Icon={HistoryIcon}>
+        <p className="text-sm text-slate-500 -mt-3 mb-4">À la fin d'un mandat, le bureau en ligne peut être rangé dans « Les anciens bureaux » (sous-page de « Le bureau »). Vous pouvez ensuite changer le mandat et le bureau pour la nouvelle équipe.</p>
+        {mandatChange && (
+          <label className="flex items-start gap-2 p-3 rounded-xl bg-amber-50 border border-amber-200 text-sm text-amber-900 mb-4">
+            <input type="checkbox" checked={archiverAuto} onChange={(e) => setArchiverAuto(e.target.checked)} className="mt-0.5" />
+            <span>Archiver le bureau du mandat <strong>{MANDAT}</strong> dans les anciens bureaux en enregistrant.</span>
+          </label>
+        )}
+        {arch.length === 0 ? <p className="text-sm text-slate-500 mb-4">Aucun bureau archivé pour le moment.</p> : (
+          <ul className="divide-y divide-slate-100 mb-4">
+            {[...arch].sort((a, b) => periodeDe(b.mandat).debut.localeCompare(periodeDe(a.mandat).debut)).map((a) => (
+              <li key={a.mandat} className="py-2.5 flex items-center justify-between gap-3 text-sm">
+                <span className="min-w-0"><strong className="text-slate-900">Mandat {a.mandat}</strong><span className="text-slate-500"> · {a.president || "président non indiqué"} · {(a.bureau || []).reduce((n, d) => n + (d.members || []).length, 0)} membres</span></span>
+                <ConfirmButton onConfirm={() => retirerArchive(a.mandat)} confirmLabel="Retirer ?" ariaLabel={`Retirer le mandat ${a.mandat}`} className="p-2 rounded-lg text-rose-600 hover:bg-rose-50"><Trash2 size={16} /></ConfirmButton>
+              </li>
+            ))}
+          </ul>
+        )}
+        <button onClick={archiverMaintenant} disabled={busy} className="px-4 py-2.5 rounded-xl bg-white border border-slate-300 text-sm font-semibold text-slate-700 hover:border-orange-400 hover:text-orange-700 disabled:opacity-60">Archiver le bureau en ligne{MANDAT ? ` (${MANDAT})` : ""} maintenant</button>
       </Panel>
       <SaveBar busy={busy} onSave={save} onReset={reset} />
     </div>
