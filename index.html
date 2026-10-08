@@ -113,20 +113,6 @@
   @keyframes fadeUp{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:none}}.fade-up{animation:fadeUp .6s ease both}
   @keyframes pulseDot{0%,100%{opacity:1}50%{opacity:.3}}.pulse-dot{animation:pulseDot 1.6s ease-in-out infinite}
   @keyframes spin{to{transform:rotate(360deg)}}
-
-  /* ===== Carte des anciens ===== */
-  .cge-pin{position:relative;display:flex;align-items:center;justify-content:center;border-radius:9999px;color:#fff;font-family:Inter,sans-serif;font-weight:700;border:3px solid #fff;background:#e67700;box-shadow:0 4px 12px rgba(15,23,42,.28);transition:transform .25s cubic-bezier(.2,.8,.2,1),box-shadow .25s,background .25s;cursor:pointer}
-  .cge-pin.approx{background:rgba(230,119,0,.55)}
-  .cge-pin:hover,.cge-pin.hot{transform:scale(1.14);box-shadow:0 6px 18px rgba(15,23,42,.38)}
-  .cge-pin.sel{background:#0f172a;transform:scale(1.2);box-shadow:0 0 0 6px rgba(230,119,0,.35),0 6px 18px rgba(15,23,42,.4)}
-  .cge-pin.sel::after{content:"";position:absolute;inset:-9px;border-radius:9999px;border:2px solid rgba(230,119,0,.6);animation:cgePing 1.8s ease-out infinite}
-  @keyframes cgePing{from{transform:scale(.85);opacity:.9}to{transform:scale(1.35);opacity:0}}
-  .cge-map .leaflet-control-zoom{border:0!important;box-shadow:0 4px 14px rgba(15,23,42,.18)!important;border-radius:14px;overflow:hidden}
-  .cge-map .leaflet-control-zoom a{width:38px;height:38px;line-height:38px;color:#334155;border:0!important}
-  .cge-map .leaflet-control-zoom a:hover{background:#fff7ed;color:#c2410c}
-  .cge-map .leaflet-control-attribution{font-size:10px;background:rgba(255,255,255,.7)}
-  .cge-panel-in{animation:cgePanel .28s ease both}
-  @keyframes cgePanel{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
   .loader{width:44px;height:44px;border:4px solid #ffd68f;border-top-color:#ff8a00;border-radius:50%;animation:spin .8s linear infinite}
   @media (prefers-reduced-motion:reduce){*{animation:none!important}}
   /* ===== Confort d'utilisation et animations légères ===== */
@@ -2787,14 +2773,11 @@ const chargerLeaflet = () => {
 };
 
 function CarteAnciens({ list, renderPerson }) {
-  const box = useRef(null), mapRef = useRef(null), marqueurs = useRef({}), dernierCadre = useRef(""), selRef = useRef(null);
+  const box = useRef(null), mapRef = useRef(null), couche = useRef(null), dernierCadre = useRef("");
   const [pret, setPret] = useState(false);
   const [erreur, setErreur] = useState(false);
   const [selKey, setSelKey] = useState(null);
-  const [filtre, setFiltre] = useState("");
   const [, setTick] = useState(0);
-  const reduit = typeof window !== "undefined" && window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  const duree = reduit ? 0 : 0.9;
 
   // Regroupement par lieu : un point par ville, avec le nombre d'anciens.
   const lieux = {};
@@ -2806,171 +2789,81 @@ function CarteAnciens({ list, renderPerson }) {
     (lieux[k] = lieux[k] || { key: k, ...loc, gens: [] }).gens.push(p);
   });
   const points = Object.values(lieux).sort((a, b) => b.gens.length - a.gens.length || a.label.localeCompare(b.label, "fr"));
-  const total = points.reduce((s, x) => s + x.gens.length, 0);
   const sel = points.find((x) => x.key === selKey) || null;
   const signature = points.map((x) => `${x.key}:${x.gens.length}:${x.approx ? 1 : 0}`).join("|");
-  const maxN = points.length ? points[0].gens.length : 1;
-  const visibles = filtre.trim() ? points.filter((x) => nl(x.label).includes(nl(filtre))) : points;
-  selRef.current = selKey;
 
   // Villes inconnues : on les cherche en arrière-plan puis la carte se met à jour.
   useEffect(() => { geocoderVilles(list, () => setTick((t) => t + 1)); }, [list.length]);
 
-  const iconePour = (pl, estSel) => {
-    const L = window.L, n = pl.gens.length, t = Math.min(58, 30 + Math.round(Math.sqrt(n) * 6));
-    return L.divIcon({ className: "", iconSize: [t, t], iconAnchor: [t / 2, t / 2], html:
-      `<div class="cge-pin${pl.approx ? " approx" : ""}${estSel ? " sel" : ""}" style="width:${t}px;height:${t}px;font-size:${t > 38 ? 15 : 13}px">${n}</div>` });
-  };
-
-  // Création de la carte (une seule fois)
   useEffect(() => {
     let annule = false;
     chargerLeaflet().then((L) => {
       if (annule || !box.current || mapRef.current) return;
-      const m = L.map(box.current, { scrollWheelZoom: false, worldCopyJump: true, zoomControl: false, zoomSnap: 0.5, zoomDelta: 1, wheelPxPerZoomLevel: 90, minZoom: 2 }).setView([7.5, -5.5], 5);
-      L.control.zoom({ position: "bottomright", zoomInTitle: "Zoom avant", zoomOutTitle: "Zoom arrière" }).addTo(m);
-      // Fond clair et sobre (CARTO / OpenStreetMap), avec repli sur OpenStreetMap si indisponible.
-      const clair = L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png", { subdomains: "abcd", maxZoom: 19, attribution: "© OpenStreetMap · © CARTO" }).addTo(m);
-      let bascule = false;
-      clair.on("tileerror", () => { if (bascule) return; bascule = true; m.removeLayer(clair); L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 18, attribution: "© OpenStreetMap" }).addTo(m); });
+      const m = L.map(box.current, { scrollWheelZoom: false, worldCopyJump: true }).setView([7.5, -5.5], 5);
+      L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 18, attribution: "© OpenStreetMap" }).addTo(m);
       m.on("focus", () => m.scrollWheelZoom.enable()); m.on("blur", () => m.scrollWheelZoom.disable());
-      m.on("click", () => setSelKey(null));
+      couche.current = L.layerGroup().addTo(m);
       mapRef.current = m;
       setPret(true);
       setTimeout(() => m.invalidateSize(), 150);
     }).catch(() => setErreur(true));
-    return () => { annule = true; marqueurs.current = {}; if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; } };
+    return () => { annule = true; if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; couche.current = null; } };
   }, []);
 
-  // La carte suit la taille de son cadre (rotation du téléphone, ouverture du panneau…)
   useEffect(() => {
-    if (!pret || !box.current || typeof ResizeObserver === "undefined") return;
-    const ro = new ResizeObserver(() => mapRef.current && mapRef.current.invalidateSize());
-    ro.observe(box.current);
-    return () => ro.disconnect();
-  }, [pret]);
-
-  // Marqueurs : on ajoute, met à jour ou retire seulement ce qui change (pas de clignotement).
-  useEffect(() => {
-    const L = window.L, m = mapRef.current;
-    if (!pret || !L || !m) return;
-    const actuels = marqueurs.current, vus = new Set();
+    const L = window.L, m = mapRef.current, g = couche.current;
+    if (!pret || !L || !m || !g) return;
+    g.clearLayers();
     points.forEach((pl) => {
-      vus.add(pl.key);
-      const signe = `${pl.gens.length}:${pl.approx ? 1 : 0}`;
-      const ex = actuels[pl.key];
-      if (ex) {
-        ex.pl = pl;
-        if (ex.signe !== signe) { ex.signe = signe; ex.marker.setIcon(iconePour(pl, selRef.current === pl.key)); }
-      } else {
-        const marker = L.marker([pl.lat, pl.lng], { icon: iconePour(pl, selRef.current === pl.key), title: `${pl.label} : ${pl.gens.length}`, riseOnHover: true })
-          .on("click", (e) => { L.DomEvent.stopPropagation(e); setSelKey(pl.key); })
-          .addTo(m);
-        actuels[pl.key] = { marker, signe, pl };
-      }
+      const n = pl.gens.length, taille = Math.min(56, 28 + Math.round(Math.sqrt(n) * 6));
+      const icone = L.divIcon({ className: "", iconSize: [taille, taille], html:
+        `<div style="width:${taille}px;height:${taille}px;border-radius:9999px;background:${pl.approx ? "rgba(230,119,0,.5)" : "#e67700"};border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.3);color:#fff;font:700 ${taille > 36 ? 15 : 13}px Inter,sans-serif;display:flex;align-items:center;justify-content:center">${n}</div>` });
+      L.marker([pl.lat, pl.lng], { icon: icone, title: pl.label }).on("click", () => setSelKey(pl.key)).addTo(g);
     });
-    Object.keys(actuels).forEach((k) => { if (!vus.has(k)) { m.removeLayer(actuels[k].marker); delete actuels[k]; } });
-
-    // Recadrage doux quand les lieux changent (recherche, nouvelle ville trouvée), sauf si un lieu est ouvert.
-    if (points.length && dernierCadre.current !== signature && !selRef.current) {
-      const premier = dernierCadre.current === "";
+    // On recadre la carte quand les lieux changent (recherche, nouvelle ville trouvée).
+    if (points.length && dernierCadre.current !== signature) {
       dernierCadre.current = signature;
-      if (points.length === 1) m.flyTo([points[0].lat, points[0].lng], points[0].approx ? 6 : 11, { duration: premier ? 0 : duree });
-      else {
-        const b = L.latLngBounds(points.map((x) => [x.lat, x.lng]));
-        if (premier) m.fitBounds(b, { padding: [50, 50], maxZoom: 11, animate: false });
-        else m.flyToBounds(b, { padding: [50, 50], maxZoom: 11, duration: duree });
-      }
+      if (points.length === 1) m.setView([points[0].lat, points[0].lng], points[0].approx ? 6 : 11);
+      else m.fitBounds(L.latLngBounds(points.map((x) => [x.lat, x.lng])), { padding: [40, 40], maxZoom: 11 });
     }
   }, [pret, signature]);
 
-  // Lieu sélectionné : mise en valeur du marqueur
-  useEffect(() => {
-    if (!pret) return;
-    Object.entries(marqueurs.current).forEach(([k, o]) => o.marker.setIcon(iconePour(o.pl, k === selKey)));
-  }, [pret, selKey, signature]);
-
-  // Échap referme le lieu ouvert
-  useEffect(() => {
-    const f = (e) => { if (e.key === "Escape") setSelKey(null); };
-    window.addEventListener("keydown", f);
-    return () => window.removeEventListener("keydown", f);
-  }, []);
-
-  const aller = (pl) => {
-    setSelKey(pl.key);
-    const m = mapRef.current;
-    if (m) m.flyTo([pl.lat, pl.lng], Math.max(m.getZoom(), pl.approx ? 6 : 10), { duration: reduit ? 0 : 0.8 });
-  };
-  const toutVoir = () => {
-    const L = window.L, m = mapRef.current;
-    setSelKey(null);
-    if (!L || !m || !points.length) return;
-    if (points.length === 1) m.flyTo([points[0].lat, points[0].lng], points[0].approx ? 6 : 11, { duration: duree });
-    else m.flyToBounds(L.latLngBounds(points.map((x) => [x.lat, x.lng])), { padding: [50, 50], maxZoom: 11, duration: duree });
-  };
-  // Survol dans la liste : le point correspondant ressort sur la carte.
-  const survol = (k, on) => { const o = marqueurs.current[k], el = o && o.marker.getElement(); const pin = el && el.firstChild; if (pin) pin.classList.toggle("hot", on); };
+  const aller = (pl) => { setSelKey(pl.key); if (mapRef.current) mapRef.current.flyTo([pl.lat, pl.lng], Math.max(mapRef.current.getZoom(), pl.approx ? 6 : 10), { duration: 0.8 }); };
 
   if (erreur) return <div className="bg-white rounded-3xl p-8 text-center text-slate-500 shadow-sm">La carte n'a pas pu se charger (connexion ?). Revenez à la liste ou réessayez plus tard.</div>;
   return (
     <div className="space-y-4">
-      <div className="grid lg:grid-cols-[1fr_350px] gap-5 items-start">
-        <div className="relative isolate rounded-3xl overflow-hidden border border-slate-200 bg-slate-100 shadow-sm">
-          <div ref={box} className="cge-map w-full h-[380px] sm:h-[540px]" style={{ zIndex: 0 }} />
-          {!pret && <div className="absolute inset-0 flex items-center justify-center bg-slate-100"><div className="loader" /></div>}
-          {pret && (
+      <div className="grid lg:grid-cols-[1fr_340px] gap-5 items-start">
+        <div className="relative rounded-3xl overflow-hidden border border-slate-200 bg-slate-100 shadow-sm">
+          <div ref={box} className="w-full h-[380px] sm:h-[520px]" style={{ zIndex: 0 }} />
+          {!pret && <div className="absolute inset-0 flex items-center justify-center"><div className="loader" /></div>}
+        </div>
+        <div className="bg-white rounded-3xl shadow-sm p-4">
+          {sel ? (
             <>
-              <div className="absolute top-3 left-3 z-[900] px-3.5 py-2 rounded-2xl bg-white/90 backdrop-blur shadow-md text-xs text-slate-600 pointer-events-none">
-                <span className="font-extrabold text-slate-900 text-sm">{total}</span> ancien{total > 1 ? "s" : ""} · <span className="font-extrabold text-slate-900 text-sm">{points.length}</span> lieu{points.length > 1 ? "x" : ""}
+              <div className="flex items-start justify-between gap-2 mb-1">
+                <div className="min-w-0">
+                  <p className="font-extrabold text-slate-900 flex items-center gap-1.5"><MapPin size={16} className="text-orange-600 flex-shrink-0" /> {sel.label}</p>
+                  <p className="text-xs text-slate-500">{sel.gens.length} ancien{sel.gens.length > 1 ? "s" : ""}{sel.approx ? " · position approximative (pays)" : ""}</p>
+                </div>
+                <button onClick={() => setSelKey(null)} aria-label="Fermer" className="w-7 h-7 rounded-full text-slate-400 hover:bg-slate-100 flex items-center justify-center flex-shrink-0"><X size={15} /></button>
               </div>
-              {points.length > 1 && (
-                <button onClick={toutVoir} className="absolute top-3 right-3 z-[900] px-3.5 py-2 rounded-2xl bg-white/90 backdrop-blur shadow-md text-xs font-semibold text-slate-700 hover:text-orange-700 hover:bg-white transition">Tout voir</button>
+              <div className="divide-y divide-slate-100 max-h-[420px] overflow-y-auto">{sel.gens.map((p) => renderPerson(p))}</div>
+            </>
+          ) : (
+            <>
+              <p className="font-extrabold text-slate-900">Où sont les anciens ?</p>
+              <p className="text-xs text-slate-500 mt-0.5 mb-3">Touchez un point de la carte, ou un lieu ci-dessous.</p>
+              {points.length === 0 ? <p className="text-sm text-slate-500">Aucun lieu renseigné pour cette sélection.</p> : (
+                <div className="flex flex-wrap gap-2 max-h-[420px] overflow-y-auto">
+                  {points.map((pl) => (
+                    <button key={pl.key} onClick={() => aller(pl)} className="px-3 py-1.5 rounded-full bg-slate-100 hover:bg-orange-50 hover:text-orange-700 text-sm text-slate-700 transition">
+                      {pl.label} <span className="font-bold text-orange-600">{pl.gens.length}</span>
+                    </button>
+                  ))}
+                </div>
               )}
             </>
-          )}
-        </div>
-
-        <div className="bg-white rounded-3xl shadow-sm p-4 lg:sticky lg:top-24">
-          {sel ? (
-            <div key={sel.key} className="cge-panel-in">
-              <div className="flex items-start justify-between gap-2 mb-2">
-                <div className="min-w-0">
-                  <button onClick={() => setSelKey(null)} className="text-xs font-semibold text-orange-600 hover:text-orange-700 mb-1">← Tous les lieux</button>
-                  <p className="font-extrabold text-slate-900 flex items-center gap-1.5 text-lg leading-tight"><MapPin size={17} className="text-orange-600 flex-shrink-0" /> {sel.label}</p>
-                  <p className="text-xs text-slate-500 mt-0.5">{sel.gens.length} ancien{sel.gens.length > 1 ? "s" : ""}{sel.approx ? " · position approximative (pays)" : ""}</p>
-                </div>
-                <button onClick={() => setSelKey(null)} aria-label="Fermer" className="w-8 h-8 rounded-full text-slate-400 hover:bg-slate-100 flex items-center justify-center flex-shrink-0"><X size={16} /></button>
-              </div>
-              <div className="divide-y divide-slate-100 max-h-[430px] overflow-y-auto pr-1">{sel.gens.map((p) => renderPerson(p))}</div>
-            </div>
-          ) : (
-            <div className="cge-panel-in">
-              <p className="font-extrabold text-slate-900">Où sont les anciens ?</p>
-              <p className="text-xs text-slate-500 mt-0.5 mb-3">Touchez un point de la carte ou un lieu de la liste.</p>
-              {points.length > 8 && (
-                <div className="relative mb-3">
-                  <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                  <input value={filtre} onChange={(e) => setFiltre(e.target.value)} placeholder="Chercher une ville ou un pays" className="w-full pl-9 pr-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300" />
-                </div>
-              )}
-              {points.length === 0 ? <p className="text-sm text-slate-500">Aucun lieu renseigné pour cette sélection.</p> : visibles.length === 0 ? <p className="text-sm text-slate-500">Aucun lieu ne correspond.</p> : (
-                <ul className="max-h-[430px] overflow-y-auto pr-1 space-y-1">
-                  {visibles.map((pl) => (
-                    <li key={pl.key}>
-                      <button onClick={() => aller(pl)} onMouseEnter={() => survol(pl.key, true)} onMouseLeave={() => survol(pl.key, false)} onFocus={() => survol(pl.key, true)} onBlur={() => survol(pl.key, false)}
-                        className="w-full text-left px-3 py-2 rounded-xl hover:bg-orange-50 transition group">
-                        <span className="flex items-center justify-between gap-2">
-                          <span className="text-sm font-medium text-slate-800 group-hover:text-orange-700 truncate">{pl.label}{pl.approx && <span className="text-[10px] text-slate-400 font-normal"> · pays</span>}</span>
-                          <span className="text-sm font-extrabold text-orange-600">{pl.gens.length}</span>
-                        </span>
-                        <span className="block h-1 rounded-full bg-slate-100 mt-1.5 overflow-hidden"><span className="block h-full rounded-full bg-orange-400 transition-all" style={{ width: Math.max(6, Math.round((pl.gens.length / maxN) * 100)) + "%" }} /></span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
           )}
         </div>
       </div>
