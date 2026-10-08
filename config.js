@@ -15,7 +15,7 @@ window.CGE_CONFIG = {
   // Président : son nom doit être écrit EXACTEMENT comme dans la liste BUREAU ci-dessous.
   PRESIDENT: {
     name: "NANGUI AKRE",
-    message: "Bienvenue sur le site de la CGE ARSTM. Notre ambition est simple : faire de chaque élève un acteur engagé de sa formation et lui ouvrir les portes du monde professionnel. Ensemble, cultivons l'entraide, l'excellence et le rayonnement de notre Académie. (Texte provisoire)",
+    message: "Bienvenue sur le site de la CGE ARSTM. Notre ambition est simple : faire de chaque élève un acteur engagé de sa formation et lui ouvrir les portes du monde professionnel. Ensemble, cultivons l'entraide, l'excellence et le rayonnement de notre Académie.",
   },
 
   // Bureau exécutif : chaque membre s'écrit ["NOM PRÉNOM", "Fonction"],
@@ -51,6 +51,6 @@ window.CGE_CONFIG = {
 
   // Images par défaut (elles peuvent aussi être changées depuis Administration → Images & logos)
   LOGO_SRC: "logos/cge-arstm.svg",
-  LOGOS_ECOLES: { ARSTM: null, ESATIC: null, "INP-HB": null, ESA: null, ESCAE: null, ESI: null, ESMG: null, ESTP: null },
+  LOGOS_ECOLES: { ARSTM: null, ESATIC: null, ENSEA: null, "INP-HB": null, ESA: null, ESCAE: null, ESI: null, ESMG: null, ESTP: null },
   PHOTOS_BUREAU: {},
 };
