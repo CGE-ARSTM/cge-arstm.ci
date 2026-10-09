@@ -8,7 +8,7 @@
 <meta name="description" content="Section ARSTM de la Conférence des Grandes Écoles de Côte d'Ivoire : actualités, événements, opportunités, réseau des anciens, mentorat, médiathèque et espace membre." />
 <meta name="theme-color" content="#ff8a00" />
 <!-- Aperçu du lien quand on le partage (WhatsApp, Facebook…) -->
-<link rel="canonical" href="https://cge-arstm.com/" />
+<!-- Adresse canonique : ajoutée par le site selon la page affichée (v108) -->
 <meta property="og:type" content="website" />
 <meta property="og:site_name" content="CGE ARSTM" />
 <meta property="og:locale" content="fr_FR" />
@@ -680,6 +680,23 @@ const PAGES_SITE = ["accueil", "apropos", "bureau", "actualites", "evenements", 
 const CHEMINS_SPECIAUX = { "anciens-bureaux": "bureau/ancien-bureau" };
 const cheminDe = (p) => (p === "accueil" ? "/" : "/" + (CHEMINS_SPECIAUX[p] || p));
 const pageDeChemin = (c) => PAGES_SITE.find((p) => (CHEMINS_SPECIAUX[p] || p) === c) || null;
+// Référencement (v108) : titre et description propres à chaque page publique.
+const SEO_PAGES = {
+  accueil: ["CGE ARSTM — Conférence des Grandes Écoles", "Section ARSTM de la Conférence des Grandes Écoles de Côte d'Ivoire : actualités, événements, opportunités, réseau des anciens, mentorat, médiathèque et espace membre."],
+  apropos: ["À propos", "Histoire, mission et valeurs de la CGE section ARSTM, et les grandes écoles membres de la Conférence des Grandes Écoles de Côte d'Ivoire."],
+  bureau: ["Le bureau exécutif", "Les membres du bureau exécutif de la CGE section ARSTM pour le mandat en cours."],
+  "anciens-bureaux": ["Les anciens bureaux", "Les équipes des mandats précédents de la CGE section ARSTM."],
+  actualites: ["Actualités", "Les dernières nouvelles de la CGE section ARSTM et de l'Académie Régionale des Sciences et Techniques de la Mer."],
+  evenements: ["Événements", "L'agenda des activités de la CGE section ARSTM : conférences, forums, sport et vie associative."],
+  opportunites: ["Opportunités", "Stages, emplois, alternances, formations, bourses et concours pour les élèves de l'ARSTM."],
+  alumni: ["Les anciens de l'ARSTM", "Témoignages, annuaire des anciens et mentorat de la CGE section ARSTM."],
+  mediatheque: ["Médiathèque", "Photos, documents et vidéos des événements de la CGE section ARSTM."],
+  partenaires: ["Nos partenaires", "Les entreprises, fondations et institutions partenaires de la CGE section ARSTM."],
+  adhesion: ["Devenir membre", "Comment adhérer à la CGE section ARSTM : conditions, étapes et campagne d'adhésion."],
+  contact: ["Contact", "Contacter le bureau de la CGE section ARSTM : renseignements, partenariats et offres."],
+  confidentialite: ["Politique de confidentialité", "Comment la CGE section ARSTM collecte, utilise et protège vos données."],
+};
+const SEO_PRIVEES = ["profil", "admin"];
 // Page indiquée dans l'adresse ; toute autre valeur (par exemple celle ajoutée par Supabase après un email) mène à l'accueil.
 // Adresses propres (v103, site hébergé sur Cloudflare Pages) : cge-arstm.com/bureau.
 // Les anciens liens cge-arstm.com/#bureau sont convertis automatiquement ; les valeurs ajoutées par Supabase après un email ne sont pas touchées.
@@ -1492,16 +1509,37 @@ function App() {
   const [postesAnciens, setPostesAnciens] = useState([]);
   useEffect(() => { sb.rpc("postes_anciens").then(({ data }) => setPostesAnciens(data || []), () => {}); }, [uid]);
 
+  // Référencement (v108) : titre, description et adresse canonique propres à chaque page.
+  useEffect(() => {
+    const [t, d] = SEO_PAGES[page] || SEO_PAGES.accueil;
+    const titre = page === "accueil" ? t : t + " — CGE ARSTM";
+    const url = "https://cge-arstm.com" + cheminDe(page);
+    const poser = (sel, attr, val) => { const el = document.head.querySelector(sel); if (el) el.setAttribute(attr, val); };
+    document.title = titre;
+    poser('meta[name="description"]', "content", d);
+    poser('meta[property="og:url"]', "content", url);
+    poser('meta[property="og:title"]', "content", titre);
+    poser('meta[property="og:description"]', "content", d);
+    let can = document.head.querySelector('link[rel="canonical"]');
+    if (!can) { can = document.createElement("link"); can.setAttribute("rel", "canonical"); document.head.appendChild(can); }
+    can.setAttribute("href", url);
+    let rob = document.head.querySelector('meta[name="robots"]');
+    if (SEO_PRIVEES.includes(page)) {
+      if (!rob) { rob = document.createElement("meta"); rob.setAttribute("name", "robots"); document.head.appendChild(rob); }
+      rob.setAttribute("content", "noindex");
+    } else if (rob) rob.remove();
+  }, [page]);
   if (firstLoad || !settingsReady) return <FullLoader />;
 
+  const lien = (id) => ({ href: cheminDe(id), onClick: (e) => { if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return; e.preventDefault(); go(id); } });
   const navBtn = (id, label) => (
-    <button key={id} onClick={() => go(id)} className={`relative px-2.5 py-2 text-sm font-medium transition whitespace-nowrap inline-flex items-center ${page === id ? "text-orange-600" : "text-slate-600 hover:text-slate-900"}`}>
+    <a key={id} {...lien(id)} className={`relative px-2.5 py-2 text-sm font-medium transition whitespace-nowrap inline-flex items-center ${page === id ? "text-orange-600" : "text-slate-600 hover:text-slate-900"}`}>
       {label}<NavCount id={id} />
       {page === id && <span className="absolute left-2.5 right-2.5 -bottom-0.5 h-0.5 rounded-full bg-orange-600" />}
-    </button>
+    </a>
   );
   const mobileBtn = (id, label) => (
-    <button key={id} onClick={() => go(id)} className={`text-left px-3 py-3 rounded-lg flex items-center ${page === id ? "text-orange-600 bg-orange-50 font-semibold" : "text-slate-700"}`}>{label}<NavCount id={id} /></button>
+    <a key={id} {...lien(id)} className={`text-left px-3 py-3 rounded-lg flex items-center ${page === id ? "text-orange-600 bg-orange-50 font-semibold" : "text-slate-700"}`}>{label}<NavCount id={id} /></a>
   );
   const assoActive = navAsso.some(([id]) => id === page) || page === "anciens-bureaux";
 
@@ -1537,7 +1575,7 @@ function App() {
               <div className="absolute left-0 top-full pt-2 hidden group-hover:block group-focus-within:block">
                 <div className="bg-white rounded-2xl shadow-xl border border-slate-100 p-2 w-48">
                   {navAsso.map(([id, label]) => (
-                    <button key={id} onClick={() => { go(id); if (document.activeElement) document.activeElement.blur(); }} className={`block w-full text-left px-3 py-2 rounded-lg text-sm transition ${page === id ? "bg-orange-50 text-orange-600 font-semibold" : "text-slate-700 hover:bg-orange-50"}`}>{label}</button>
+                    <a key={id} href={cheminDe(id)} onClick={(e) => { if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return; e.preventDefault(); go(id); if (document.activeElement) document.activeElement.blur(); }} className={`block w-full text-left px-3 py-2 rounded-lg text-sm transition ${page === id ? "bg-orange-50 text-orange-600 font-semibold" : "text-slate-700 hover:bg-orange-50"}`}>{label}</a>
                   ))}
                 </div>
               </div>
@@ -1897,7 +1935,7 @@ function App() {
           <div>
             <h4 className="text-white font-semibold mb-4">Liens rapides</h4>
             <div className="flex flex-col gap-2 text-sm">
-              {[...navAsso, ...navMain].map(([id, label]) => <button key={id} onClick={() => go(id)} className="text-left hover:text-orange-400 transition">{label}</button>)}
+              {[...navAsso, ...navMain].map(([id, label]) => <a key={id} {...lien(id)} className="text-left hover:text-orange-400 transition">{label}</a>)}
             </div>
           </div>
         </div>
