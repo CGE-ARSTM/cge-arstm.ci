@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Page introuvable | CGE ARSTM</title>
+  <meta name="robots" content="noindex" />
+  <link rel="icon" href="/favicon.ico" sizes="any" />
+  <link rel="icon" type="image/png" sizes="48x48" href="/logos/favicon-48.png" />
+  <link rel="apple-touch-icon" href="/logos/apple-touch-icon.png" />
+  <meta name="theme-color" content="#0b1b33" />
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      background: linear-gradient(135deg, #0b1b33 0%, #13294b 55%, #1e3a63 100%); color: #0b1b33;
+    }
+    .carte { width: 100%; max-width: 560px; background: #fff; border-radius: 28px; padding: 40px 32px; text-align: center; box-shadow: 0 25px 60px rgba(0, 0, 0, .35); }
+    .logo { width: 84px; height: 84px; object-fit: contain; }
+    .code { font-size: 88px; line-height: 1; font-weight: 800; margin-top: 20px; color: #e67700; letter-spacing: -2px; }
+    h1 { font-size: 26px; margin-top: 12px; line-height: 1.25; }
+    p { color: #475569; margin-top: 12px; line-height: 1.6; font-size: 16px; }
+    .chemin { display: inline-block; margin-top: 10px; padding: 4px 10px; border-radius: 8px; background: #f1f5f9; color: #334155; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; word-break: break-all; }
+    .boutons { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; margin-top: 28px; }
+    a.btn { text-decoration: none; padding: 13px 22px; border-radius: 14px; font-weight: 700; font-size: 15px; transition: background .2s; }
+    a.principal { background: #e67700; color: #fff; }
+    a.principal:hover { background: #c96500; }
+    a.secondaire { background: #fff; color: #0b1b33; border: 1px solid #cbd5e1; }
+    a.secondaire:hover { background: #f8fafc; }
+    .liens { margin-top: 26px; padding-top: 20px; border-top: 1px solid #e2e8f0; font-size: 14px; color: #64748b; }
+    .liens a { color: #c96500; text-decoration: none; font-weight: 600; margin: 0 6px; white-space: nowrap; }
+    .liens a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <main class="carte">
+    <img class="logo" src="/logos/cge-arstm.svg" alt="CGE ARSTM" onerror="this.style.display='none'" />
+    <div class="code">404</div>
+    <h1>Cette page est introuvable</h1>
+    <p>L'adresse a peut-être été mal saisie, ou la page a été déplacée ou supprimée.</p>
+    <span class="chemin" id="chemin"></span>
+    <div class="boutons">
+      <a class="btn principal" href="/">Retour à l'accueil</a>
+      <a class="btn secondaire" href="/evenements">Voir les événements</a>
+    </div>
+    <div class="liens">
+      Ou bien :
+      <a href="/actualites">Actualités</a>·
+      <a href="/opportunites">Opportunités</a>·
+      <a href="/adhesion">Devenir membre</a>·
+      <a href="/contact">Nous contacter</a>
+    </div>
+  </main>
+  <script>
+    document.getElementById("chemin").textContent = decodeURIComponent(location.pathname);
+  </script>
+</body>
+</html>
