@@ -12,6 +12,10 @@ window.CGE_CONFIG = {
   // Mandat du bureau en cours (affiché sur l'accueil et la page « Le bureau »)
   MANDAT: "2026-2027",
 
+  // Anti-robot Cloudflare Turnstile (v125) : clé PUBLIQUE uniquement.
+  // La clé secrète va dans Supabase, jamais ici.
+  TURNSTILE_SITE_KEY: "0x4AAAAAAFTN-lJKOoeLkbyy",
+
   // Président : son nom doit être écrit EXACTEMENT comme dans la liste BUREAU ci-dessous.
   PRESIDENT: {
     name: "NANGUI AKRE",
