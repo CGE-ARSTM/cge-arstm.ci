@@ -2699,6 +2699,136 @@ const AuteurSavoir = ({ s, clair }) => (
   </div>
 );
 
+// Partage en image (v142) : une carte nette du savoir (1080 × 1350), partagée par le menu du téléphone
+// (WhatsApp, Statut, Instagram…) avec le texte et le lien. Sur ordinateur : téléchargement de l'image.
+const chargerImage = (src, crossOrigin) => new Promise((ok) => {
+  if (!src) return ok(null);
+  const i = new Image();
+  if (crossOrigin) i.crossOrigin = "anonymous";
+  i.onload = () => ok(i); i.onerror = () => ok(null);
+  i.src = src;
+});
+const couperLignes = (x, texte, largeur) => {
+  const lignes = [];
+  String(texte || "").split(/\n+/).forEach((para) => {
+    let l = "";
+    para.split(/\s+/).filter(Boolean).forEach((mot) => {
+      const essai = l ? l + " " + mot : mot;
+      if (x.measureText(essai).width <= largeur || !l) l = essai; else { lignes.push(l); l = mot; }
+    });
+    if (l) lignes.push(l);
+  });
+  return lignes;
+};
+const dessinerCarteSavoir = async (s) => {
+  const W = 1080, H = 1350, M = 80;
+  const c = document.createElement("canvas"); c.width = W; c.height = H;
+  const x = c.getContext("2d");
+  try { if (document.fonts && document.fonts.ready) await document.fonts.ready; } catch (e) { /* polices système */ }
+  const police = getComputedStyle(document.body).fontFamily || "sans-serif";
+  const [logo, photo] = await Promise.all([chargerImage("/logos/cge-arstm.svg"), chargerImage(s.auteur_photo, true)]);
+  // Fond bleu marine, halos et vagues
+  const g = x.createLinearGradient(0, 0, W, H); g.addColorStop(0, "#0b1b33"); g.addColorStop(0.55, "#13294b"); g.addColorStop(1, "#1e3a5f");
+  x.fillStyle = g; x.fillRect(0, 0, W, H);
+  const halo = (cx, cy, r, col) => { const rg = x.createRadialGradient(cx, cy, 0, cx, cy, r); rg.addColorStop(0, col); rg.addColorStop(1, "rgba(0,0,0,0)"); x.fillStyle = rg; x.fillRect(0, 0, W, H); };
+  halo(960, 160, 480, "rgba(255,138,0,0.22)"); halo(80, 1150, 420, "rgba(56,189,248,0.12)");
+  x.strokeStyle = "rgba(255,255,255,0.06)"; x.lineWidth = 3;
+  for (let k = 0; k < 5; k++) { x.beginPath(); for (let px = 0; px <= W; px += 6) { const py = 1010 + k * 34 + Math.sin((px + k * 50) / 40) * 9; px === 0 ? x.moveTo(px, py) : x.lineTo(px, py); } x.stroke(); }
+  const rr = (X, Y, w, h, r) => { x.beginPath(); x.moveTo(X + r, Y); x.arcTo(X + w, Y, X + w, Y + h, r); x.arcTo(X + w, Y + h, X, Y + h, r); x.arcTo(X, Y + h, X, Y, r); x.arcTo(X, Y, X + w, Y, r); x.closePath(); };
+  x.textAlign = "left"; x.textBaseline = "alphabetic";
+  // En-tête : logo et nom
+  x.fillStyle = "#ffffff"; rr(M, 80, 124, 124, 28); x.fill();
+  if (logo) x.drawImage(logo, M + 12, 92, 100, 100);
+  x.font = `800 44px ${police}`; x.fillStyle = "#ffffff"; x.fillText("CGE", M + 156, 140);
+  x.fillStyle = "#ff8a00"; x.fillText("ARSTM", M + 156 + x.measureText("CGE ").width, 140);
+  x.font = `500 26px ${police}`; x.fillStyle = "rgba(255,255,255,0.75)"; x.fillText("Conférence des Grandes Écoles", M + 156, 182);
+  // Bloc central (étiquette, titre, extrait), centré verticalement entre l'en-tête et l'auteur.
+  const largeur = W - 2 * M, HAUT = 250, BAS = 1000;
+  const titre = String(s.titre || "").replace(/^le saviez[- ]vous\s*\??\s*[:\-–—]?\s*/i, "").trim() || s.titre || "";
+  let taille = 72, lignes;
+  do { x.font = `800 ${taille}px ${police}`; lignes = couperLignes(x, titre, largeur); taille -= 4; } while (lignes.length > 5 && taille > 40);
+  taille += 4; lignes = lignes.slice(0, 5);
+  const lh = Math.round(taille * 1.18);
+  x.font = `400 36px ${police}`;
+  const extrait = couperLignes(x, String(s.texte || "").replace(/\s+/g, " "), largeur);
+  const hFixe = 64 + 56 + lignes.length * lh + 30;
+  const max = Math.max(0, Math.min(8, extrait.length, Math.floor((BAS - HAUT - hFixe) / 50)));
+  const hTotal = hFixe + max * 50;
+  let y = HAUT + Math.max(0, (BAS - HAUT - hTotal) / 2);
+  // Étiquette « Le saviez-vous ? »
+  x.font = `800 30px ${police}`; const eti = "💡  LE SAVIEZ-VOUS ?"; const we = x.measureText(eti).width + 56;
+  x.fillStyle = "#ff8a00"; rr(M, y, we, 64, 32); x.fill(); x.fillStyle = "#ffffff"; x.fillText(eti, M + 28, y + 43);
+  y += 64 + 56 + Math.round(taille * 0.8);
+  // Titre (taille ajustée, 5 lignes au plus)
+  x.font = `800 ${taille}px ${police}`; x.fillStyle = "#ffffff";
+  lignes.forEach((l, i) => { x.fillText(l, M, y + i * lh); });
+  y += (lignes.length - 1) * lh + 30 + 50;
+  // Début du texte (8 lignes au plus, « … » s'il est coupé)
+  x.font = `400 36px ${police}`; x.fillStyle = "rgba(255,255,255,0.85)";
+  extrait.slice(0, max).forEach((l, i) => {
+    let t = l;
+    if (i === max - 1 && extrait.length > max) { while (x.measureText(t + " …").width > largeur && t.length > 3) t = t.slice(0, -1); t = t.replace(/\s+\S*$/, "") + " …"; }
+    x.fillText(t, M, y); y += 50;
+  });
+  // Auteur
+  const ay = 1110, d = 104;
+  x.save(); x.beginPath(); x.arc(M + d / 2, ay, d / 2, 0, Math.PI * 2); x.closePath(); x.clip();
+  if (photo) { const r = Math.max(d / photo.width, d / photo.height); x.drawImage(photo, M + d / 2 - (photo.width * r) / 2, ay - (photo.height * r) / 2, photo.width * r, photo.height * r); }
+  else { const gg = x.createLinearGradient(M, ay - d / 2, M + d, ay + d / 2); gg.addColorStop(0, "#f97316"); gg.addColorStop(1, "#fbbf24"); x.fillStyle = gg; x.fillRect(M, ay - d / 2, d, d); x.fillStyle = "#ffffff"; x.font = `800 38px ${police}`; x.textAlign = "center"; x.fillText(initials(s.auteur_nom || "?"), M + d / 2, ay + 13); x.textAlign = "left"; }
+  x.restore();
+  x.strokeStyle = "rgba(255,138,0,0.8)"; x.lineWidth = 4; x.beginPath(); x.arc(M + d / 2, ay, d / 2 + 3, 0, Math.PI * 2); x.stroke();
+  x.font = `600 26px ${police}`; x.fillStyle = "#fdba74"; x.fillText("Présenté par", M + d + 28, ay - 22);
+  x.font = `800 38px ${police}`; x.fillStyle = "#ffffff"; x.fillText(couperLignes(x, s.auteur_nom || "", largeur - d - 28)[0] || "", M + d + 28, ay + 20);
+  if (s.auteur_info) { x.font = `400 26px ${police}`; x.fillStyle = "rgba(255,255,255,0.7)"; x.fillText(couperLignes(x, s.auteur_info, largeur - d - 28)[0] || "", M + d + 28, ay + 56); }
+  // Pied de carte
+  x.fillStyle = "#ff8a00"; x.fillRect(0, H - 90, W, 90);
+  x.font = `700 32px ${police}`; x.fillStyle = "#ffffff"; x.textAlign = "center"; x.fillText("Lire la suite sur cge-arstm.com", W / 2, H - 34); x.textAlign = "left";
+  return new Promise((ok) => c.toBlob((b) => ok(b), "image/jpeg", 0.92));
+};
+
+function PartageImage({ s, notify, petit }) {
+  const [carte, setCarte] = useState(null); // { blob, url }
+  const [busy, setBusy] = useState(false);
+  const url = lienSavoir(s);
+  const texte = `💡 Le saviez-vous ? ${String(s.titre || "").replace(/^le saviez[- ]vous\s*\??\s*[:\-–—]?\s*/i, "")}${s.auteur_nom ? `\nPrésenté par ${s.auteur_nom}` : ""}\n\nÀ lire sur ${url}`;
+  const fichier = () => new File([carte.blob], `le-saviez-vous-${s.id}.jpg`, { type: "image/jpeg" });
+  const ouvrir = async () => {
+    if (busy) return;
+    setBusy(true);
+    try { const blob = await dessinerCarteSavoir(s); setCarte({ blob, url: URL.createObjectURL(blob) }); }
+    catch (e) { notify && notify("Image impossible à fabriquer : " + e.message, "error"); }
+    finally { setBusy(false); }
+  };
+  const fermer = () => { if (carte) URL.revokeObjectURL(carte.url); setCarte(null); };
+  useEffect(() => { if (!carte) return; const k = (e) => { if (e.key === "Escape") fermer(); }; window.addEventListener("keydown", k); return () => window.removeEventListener("keydown", k); }, [carte]);
+  const peutPartager = !!(carte && navigator.canShare && (() => { try { return navigator.canShare({ files: [fichier()] }); } catch (e) { return false; } })());
+  const partager = async () => {
+    try { await navigator.share({ files: [fichier()], text: texte }); }
+    catch (e) { if (e && e.name !== "AbortError") notify && notify("Partage impossible : téléchargez l'image à la place.", "error"); }
+  };
+  const copier = async () => { try { await navigator.clipboard.writeText(texte); notify && notify("Texte copié : collez-le sous l'image."); } catch (e) { window.prompt("Copiez le texte :", texte); } };
+  const cls = petit ? "px-3 py-1.5 rounded-lg text-xs" : "px-4 py-2.5 rounded-xl text-sm";
+  return (
+    <>
+      <button type="button" onClick={ouvrir} disabled={busy} className={cls + " bg-orange-600 hover:bg-orange-700 text-white font-semibold inline-flex items-center gap-2 disabled:opacity-60"}><ImageIcon size={petit ? 13 : 15} /> {busy ? "Préparation…" : "Partager en image"}</button>
+      {carte && (
+        <div className="fixed inset-0 z-[70] bg-slate-950/90 backdrop-blur-sm flex items-center justify-center p-4" onClick={fermer} role="dialog" aria-modal="true" aria-label="Partager en image">
+          <button onClick={fermer} aria-label="Fermer" className="absolute top-4 right-4 w-11 h-11 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center"><X size={22} /></button>
+          <div onClick={(e) => e.stopPropagation()} className="w-full max-w-sm flex flex-col items-center">
+            <img src={carte.url} alt={"Carte : " + s.titre} className="w-auto max-h-[62vh] rounded-2xl shadow-2xl" />
+            <div className="mt-4 w-full grid grid-cols-1 gap-2">
+              {peutPartager && <button onClick={partager} className="w-full px-4 py-3 rounded-xl bg-[#25D366] text-white font-bold inline-flex items-center justify-center gap-2"><Send size={17} /> Partager (WhatsApp, Statut, Instagram…)</button>}
+              <a href={carte.url} download={`le-saviez-vous-${s.id}.jpg`} className="w-full px-4 py-3 rounded-xl bg-white text-slate-900 font-semibold text-center">Télécharger l'image</a>
+              <button onClick={copier} className="w-full px-4 py-3 rounded-xl bg-white/10 text-white font-semibold">Copier le texte et le lien</button>
+            </div>
+            <p className="text-xs text-white/60 mt-3 text-center">{peutPartager ? "Si WhatsApp n'ajoute pas le texte sous l'image, touchez « Copier le texte » puis collez-le." : "Téléchargez l'image, puis envoyez-la avec le texte copié."}</p>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 // Partage d'un savoir (v140) : WhatsApp (avec aperçu : titre, texte, image) ou copie du lien.
 function PartageSavoir({ s, notify, petit }) {
   const url = lienSavoir(s);
@@ -2710,6 +2840,7 @@ function PartageSavoir({ s, notify, petit }) {
   const cls = petit ? "px-3 py-1.5 rounded-lg text-xs" : "px-4 py-2.5 rounded-xl text-sm";
   return (
     <div className="flex flex-wrap gap-2">
+      <PartageImage s={s} notify={notify} petit={petit} />{/* (v142) */}
       <a href={/* api.whatsapp.com garde les émojis, contrairement à wa.me (v141) */ "https://api.whatsapp.com/send?text=" + encodeURIComponent(msg)} target="_blank" rel="noopener noreferrer" className={cls + " bg-[#25D366] hover:bg-[#1ebe5b] text-white font-semibold inline-flex items-center gap-2"}><Send size={petit ? 13 : 15} /> Partager sur WhatsApp</a>
       <button type="button" onClick={copier} className={cls + " bg-white border border-slate-300 text-slate-700 font-semibold hover:text-orange-600"}>Copier le lien</button>
     </div>
@@ -9409,7 +9540,7 @@ class ErrorBoundary extends React.Component {
 window.__CGE_STARTED = true;
 ReactDOM.createRoot(document.getElementById("root")).render(<ErrorBoundary><App /></ErrorBoundary>);
 </script>
-<script type="text/plain" id="app-compiled" data-v="-1170156850:687761">function _extends(){return _extends=Object.assign?Object.assign.bind():function(n){for(var e=1;e<arguments.length;e++){var t=arguments[e];for(var r in t)({}).hasOwnProperty.call(t,r)&&(n[r]=t[r]);}return n;},_extends.apply(null,arguments);}const{useState,useEffect,useContext,useRef,createContext}=React;// =====================================================================
+<script type="text/plain" id="app-compiled" data-v="1558920489:697808">function _extends(){return _extends=Object.assign?Object.assign.bind():function(n){for(var e=1;e<arguments.length;e++){var t=arguments[e];for(var r in t)({}).hasOwnProperty.call(t,r)&&(n[r]=t[r]);}return n;},_extends.apply(null,arguments);}const{useState,useEffect,useContext,useRef,createContext}=React;// =====================================================================
 // RÉGLAGES — lus depuis le fichier config.js (à modifier chaque année)
 // =====================================================================
 const CFG=window.CGE_CONFIG;if(!CFG){window.__CGE_STARTED=true;window.__cgeConfigMissing();throw new Error("config.js manquant ou invalide");}// =====================================================================
@@ -9604,8 +9735,19 @@ function AlbumDefile({a,i}){const urls=[...new Set([a.coverUrl,...(a.photos||[])
 // « LE SAVIEZ-VOUS ? » (v139) : chaque semaine, un membre de la CGE désigné par le bureau partage un savoir.
 // Le membre écrit depuis Mon espace ; le bureau publie. Table « savoirs » (SQL v139).
 // =====================================================================
-const lundiDe=(d=new Date())=>{const x=new Date(d);x.setHours(12,0,0,0);x.setDate(x.getDate()-(x.getDay()+6)%7);return x.toISOString().slice(0,10);};let SAVOIRS_CACHE=null;const chargerSavoirs=async(force=false)=>{if(SAVOIRS_CACHE&&!force)return SAVOIRS_CACHE;const{data,error}=await sb.from("savoirs").select("id, titre, texte, image, video, auteur_nom, auteur_info, auteur_photo, publie_le, semaine").eq("statut","publie").order("publie_le",{ascending:false}).limit(200);SAVOIRS_CACHE=error?[]:data||[];return SAVOIRS_CACHE;};const useSavoirs=()=>{const[l,setL]=useState(SAVOIRS_CACHE);useEffect(()=>{let ok=true;chargerSavoirs().then(d=>{if(ok)setL(d);});return()=>{ok=false;};},[]);return l;};const AuteurSavoir=({s,clair})=>/*#__PURE__*/React.createElement("div",{className:"flex items-center gap-3 min-w-0"},/*#__PURE__*/React.createElement(SafeImg,{src:s.auteur_photo,alt:s.auteur_nom,className:"w-11 h-11 rounded-full object-cover flex-shrink-0 ring-2 ring-orange-200",fallback:/*#__PURE__*/React.createElement("div",{className:"w-11 h-11 rounded-full bg-gradient-to-br from-orange-500 to-amber-400 text-white font-extrabold text-sm flex items-center justify-center flex-shrink-0"},initials(s.auteur_nom||"?"))}),/*#__PURE__*/React.createElement("div",{className:"min-w-0"},/*#__PURE__*/React.createElement("p",{className:"text-xs "+(clair?"text-orange-200":"text-slate-500")},"Pr\xE9sent\xE9 par"),/*#__PURE__*/React.createElement("p",{className:"font-bold text-sm leading-tight break-words "+(clair?"text-white":"text-slate-900")},s.auteur_nom),s.auteur_info&&/*#__PURE__*/React.createElement("p",{className:"text-xs break-words "+(clair?"text-white/70":"text-slate-500")},s.auteur_info)));// Partage d'un savoir (v140) : WhatsApp (avec aperçu : titre, texte, image) ou copie du lien.
-function PartageSavoir({s,notify,petit}){const url=lienSavoir(s);const msg=`💡 *Le saviez-vous ?*\n${s.titre}${s.auteur_nom?`\nPrésenté par ${s.auteur_nom}`:""}\n\n${url}`;const copier=async()=>{try{await navigator.clipboard.writeText(url);if(notify)notify("Lien copié : collez-le où vous voulez.");}catch(e){window.prompt("Copiez le lien :",url);}};const cls=petit?"px-3 py-1.5 rounded-lg text-xs":"px-4 py-2.5 rounded-xl text-sm";return/*#__PURE__*/React.createElement("div",{className:"flex flex-wrap gap-2"},/*#__PURE__*/React.createElement("a",{href:/* api.whatsapp.com garde les émojis, contrairement à wa.me (v141) */"https://api.whatsapp.com/send?text="+encodeURIComponent(msg),target:"_blank",rel:"noopener noreferrer",className:cls+" bg-[#25D366] hover:bg-[#1ebe5b] text-white font-semibold inline-flex items-center gap-2"},/*#__PURE__*/React.createElement(Send,{size:petit?13:15})," Partager sur WhatsApp"),/*#__PURE__*/React.createElement("button",{type:"button",onClick:copier,className:cls+" bg-white border border-slate-300 text-slate-700 font-semibold hover:text-orange-600"},"Copier le lien"));}// Carte de l'accueil : le savoir de la semaine (cachée tant qu'aucun savoir n'est publié).
+const lundiDe=(d=new Date())=>{const x=new Date(d);x.setHours(12,0,0,0);x.setDate(x.getDate()-(x.getDay()+6)%7);return x.toISOString().slice(0,10);};let SAVOIRS_CACHE=null;const chargerSavoirs=async(force=false)=>{if(SAVOIRS_CACHE&&!force)return SAVOIRS_CACHE;const{data,error}=await sb.from("savoirs").select("id, titre, texte, image, video, auteur_nom, auteur_info, auteur_photo, publie_le, semaine").eq("statut","publie").order("publie_le",{ascending:false}).limit(200);SAVOIRS_CACHE=error?[]:data||[];return SAVOIRS_CACHE;};const useSavoirs=()=>{const[l,setL]=useState(SAVOIRS_CACHE);useEffect(()=>{let ok=true;chargerSavoirs().then(d=>{if(ok)setL(d);});return()=>{ok=false;};},[]);return l;};const AuteurSavoir=({s,clair})=>/*#__PURE__*/React.createElement("div",{className:"flex items-center gap-3 min-w-0"},/*#__PURE__*/React.createElement(SafeImg,{src:s.auteur_photo,alt:s.auteur_nom,className:"w-11 h-11 rounded-full object-cover flex-shrink-0 ring-2 ring-orange-200",fallback:/*#__PURE__*/React.createElement("div",{className:"w-11 h-11 rounded-full bg-gradient-to-br from-orange-500 to-amber-400 text-white font-extrabold text-sm flex items-center justify-center flex-shrink-0"},initials(s.auteur_nom||"?"))}),/*#__PURE__*/React.createElement("div",{className:"min-w-0"},/*#__PURE__*/React.createElement("p",{className:"text-xs "+(clair?"text-orange-200":"text-slate-500")},"Pr\xE9sent\xE9 par"),/*#__PURE__*/React.createElement("p",{className:"font-bold text-sm leading-tight break-words "+(clair?"text-white":"text-slate-900")},s.auteur_nom),s.auteur_info&&/*#__PURE__*/React.createElement("p",{className:"text-xs break-words "+(clair?"text-white/70":"text-slate-500")},s.auteur_info)));// Partage en image (v142) : une carte nette du savoir (1080 × 1350), partagée par le menu du téléphone
+// (WhatsApp, Statut, Instagram…) avec le texte et le lien. Sur ordinateur : téléchargement de l'image.
+const chargerImage=(src,crossOrigin)=>new Promise(ok=>{if(!src)return ok(null);const i=new Image();if(crossOrigin)i.crossOrigin="anonymous";i.onload=()=>ok(i);i.onerror=()=>ok(null);i.src=src;});const couperLignes=(x,texte,largeur)=>{const lignes=[];String(texte||"").split(/\n+/).forEach(para=>{let l="";para.split(/\s+/).filter(Boolean).forEach(mot=>{const essai=l?l+" "+mot:mot;if(x.measureText(essai).width<=largeur||!l)l=essai;else{lignes.push(l);l=mot;}});if(l)lignes.push(l);});return lignes;};const dessinerCarteSavoir=async s=>{const W=1080,H=1350,M=80;const c=document.createElement("canvas");c.width=W;c.height=H;const x=c.getContext("2d");try{if(document.fonts&&document.fonts.ready)await document.fonts.ready;}catch(e){/* polices système */}const police=getComputedStyle(document.body).fontFamily||"sans-serif";const[logo,photo]=await Promise.all([chargerImage("/logos/cge-arstm.svg"),chargerImage(s.auteur_photo,true)]);// Fond bleu marine, halos et vagues
+const g=x.createLinearGradient(0,0,W,H);g.addColorStop(0,"#0b1b33");g.addColorStop(0.55,"#13294b");g.addColorStop(1,"#1e3a5f");x.fillStyle=g;x.fillRect(0,0,W,H);const halo=(cx,cy,r,col)=>{const rg=x.createRadialGradient(cx,cy,0,cx,cy,r);rg.addColorStop(0,col);rg.addColorStop(1,"rgba(0,0,0,0)");x.fillStyle=rg;x.fillRect(0,0,W,H);};halo(960,160,480,"rgba(255,138,0,0.22)");halo(80,1150,420,"rgba(56,189,248,0.12)");x.strokeStyle="rgba(255,255,255,0.06)";x.lineWidth=3;for(let k=0;k<5;k++){x.beginPath();for(let px=0;px<=W;px+=6){const py=1010+k*34+Math.sin((px+k*50)/40)*9;px===0?x.moveTo(px,py):x.lineTo(px,py);}x.stroke();}const rr=(X,Y,w,h,r)=>{x.beginPath();x.moveTo(X+r,Y);x.arcTo(X+w,Y,X+w,Y+h,r);x.arcTo(X+w,Y+h,X,Y+h,r);x.arcTo(X,Y+h,X,Y,r);x.arcTo(X,Y,X+w,Y,r);x.closePath();};x.textAlign="left";x.textBaseline="alphabetic";// En-tête : logo et nom
+x.fillStyle="#ffffff";rr(M,80,124,124,28);x.fill();if(logo)x.drawImage(logo,M+12,92,100,100);x.font=`800 44px ${police}`;x.fillStyle="#ffffff";x.fillText("CGE",M+156,140);x.fillStyle="#ff8a00";x.fillText("ARSTM",M+156+x.measureText("CGE ").width,140);x.font=`500 26px ${police}`;x.fillStyle="rgba(255,255,255,0.75)";x.fillText("Conférence des Grandes Écoles",M+156,182);// Bloc central (étiquette, titre, extrait), centré verticalement entre l'en-tête et l'auteur.
+const largeur=W-2*M,HAUT=250,BAS=1000;const titre=String(s.titre||"").replace(/^le saviez[- ]vous\s*\??\s*[:\-–—]?\s*/i,"").trim()||s.titre||"";let taille=72,lignes;do{x.font=`800 ${taille}px ${police}`;lignes=couperLignes(x,titre,largeur);taille-=4;}while(lignes.length>5&&taille>40);taille+=4;lignes=lignes.slice(0,5);const lh=Math.round(taille*1.18);x.font=`400 36px ${police}`;const extrait=couperLignes(x,String(s.texte||"").replace(/\s+/g," "),largeur);const hFixe=64+56+lignes.length*lh+30;const max=Math.max(0,Math.min(8,extrait.length,Math.floor((BAS-HAUT-hFixe)/50)));const hTotal=hFixe+max*50;let y=HAUT+Math.max(0,(BAS-HAUT-hTotal)/2);// Étiquette « Le saviez-vous ? »
+x.font=`800 30px ${police}`;const eti="💡  LE SAVIEZ-VOUS ?";const we=x.measureText(eti).width+56;x.fillStyle="#ff8a00";rr(M,y,we,64,32);x.fill();x.fillStyle="#ffffff";x.fillText(eti,M+28,y+43);y+=64+56+Math.round(taille*0.8);// Titre (taille ajustée, 5 lignes au plus)
+x.font=`800 ${taille}px ${police}`;x.fillStyle="#ffffff";lignes.forEach((l,i)=>{x.fillText(l,M,y+i*lh);});y+=(lignes.length-1)*lh+30+50;// Début du texte (8 lignes au plus, « … » s'il est coupé)
+x.font=`400 36px ${police}`;x.fillStyle="rgba(255,255,255,0.85)";extrait.slice(0,max).forEach((l,i)=>{let t=l;if(i===max-1&&extrait.length>max){while(x.measureText(t+" …").width>largeur&&t.length>3)t=t.slice(0,-1);t=t.replace(/\s+\S*$/,"")+" …";}x.fillText(t,M,y);y+=50;});// Auteur
+const ay=1110,d=104;x.save();x.beginPath();x.arc(M+d/2,ay,d/2,0,Math.PI*2);x.closePath();x.clip();if(photo){const r=Math.max(d/photo.width,d/photo.height);x.drawImage(photo,M+d/2-photo.width*r/2,ay-photo.height*r/2,photo.width*r,photo.height*r);}else{const gg=x.createLinearGradient(M,ay-d/2,M+d,ay+d/2);gg.addColorStop(0,"#f97316");gg.addColorStop(1,"#fbbf24");x.fillStyle=gg;x.fillRect(M,ay-d/2,d,d);x.fillStyle="#ffffff";x.font=`800 38px ${police}`;x.textAlign="center";x.fillText(initials(s.auteur_nom||"?"),M+d/2,ay+13);x.textAlign="left";}x.restore();x.strokeStyle="rgba(255,138,0,0.8)";x.lineWidth=4;x.beginPath();x.arc(M+d/2,ay,d/2+3,0,Math.PI*2);x.stroke();x.font=`600 26px ${police}`;x.fillStyle="#fdba74";x.fillText("Présenté par",M+d+28,ay-22);x.font=`800 38px ${police}`;x.fillStyle="#ffffff";x.fillText(couperLignes(x,s.auteur_nom||"",largeur-d-28)[0]||"",M+d+28,ay+20);if(s.auteur_info){x.font=`400 26px ${police}`;x.fillStyle="rgba(255,255,255,0.7)";x.fillText(couperLignes(x,s.auteur_info,largeur-d-28)[0]||"",M+d+28,ay+56);}// Pied de carte
+x.fillStyle="#ff8a00";x.fillRect(0,H-90,W,90);x.font=`700 32px ${police}`;x.fillStyle="#ffffff";x.textAlign="center";x.fillText("Lire la suite sur cge-arstm.com",W/2,H-34);x.textAlign="left";return new Promise(ok=>c.toBlob(b=>ok(b),"image/jpeg",0.92));};function PartageImage({s,notify,petit}){const[carte,setCarte]=useState(null);// { blob, url }
+const[busy,setBusy]=useState(false);const url=lienSavoir(s);const texte=`💡 Le saviez-vous ? ${String(s.titre||"").replace(/^le saviez[- ]vous\s*\??\s*[:\-–—]?\s*/i,"")}${s.auteur_nom?`\nPrésenté par ${s.auteur_nom}`:""}\n\nÀ lire sur ${url}`;const fichier=()=>new File([carte.blob],`le-saviez-vous-${s.id}.jpg`,{type:"image/jpeg"});const ouvrir=async()=>{if(busy)return;setBusy(true);try{const blob=await dessinerCarteSavoir(s);setCarte({blob,url:URL.createObjectURL(blob)});}catch(e){notify&&notify("Image impossible à fabriquer : "+e.message,"error");}finally{setBusy(false);}};const fermer=()=>{if(carte)URL.revokeObjectURL(carte.url);setCarte(null);};useEffect(()=>{if(!carte)return;const k=e=>{if(e.key==="Escape")fermer();};window.addEventListener("keydown",k);return()=>window.removeEventListener("keydown",k);},[carte]);const peutPartager=!!(carte&&navigator.canShare&&(()=>{try{return navigator.canShare({files:[fichier()]});}catch(e){return false;}})());const partager=async()=>{try{await navigator.share({files:[fichier()],text:texte});}catch(e){if(e&&e.name!=="AbortError")notify&&notify("Partage impossible : téléchargez l'image à la place.","error");}};const copier=async()=>{try{await navigator.clipboard.writeText(texte);notify&&notify("Texte copié : collez-le sous l'image.");}catch(e){window.prompt("Copiez le texte :",texte);}};const cls=petit?"px-3 py-1.5 rounded-lg text-xs":"px-4 py-2.5 rounded-xl text-sm";return/*#__PURE__*/React.createElement(React.Fragment,null,/*#__PURE__*/React.createElement("button",{type:"button",onClick:ouvrir,disabled:busy,className:cls+" bg-orange-600 hover:bg-orange-700 text-white font-semibold inline-flex items-center gap-2 disabled:opacity-60"},/*#__PURE__*/React.createElement(ImageIcon,{size:petit?13:15})," ",busy?"Préparation…":"Partager en image"),carte&&/*#__PURE__*/React.createElement("div",{className:"fixed inset-0 z-[70] bg-slate-950/90 backdrop-blur-sm flex items-center justify-center p-4",onClick:fermer,role:"dialog","aria-modal":"true","aria-label":"Partager en image"},/*#__PURE__*/React.createElement("button",{onClick:fermer,"aria-label":"Fermer",className:"absolute top-4 right-4 w-11 h-11 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center"},/*#__PURE__*/React.createElement(X,{size:22})),/*#__PURE__*/React.createElement("div",{onClick:e=>e.stopPropagation(),className:"w-full max-w-sm flex flex-col items-center"},/*#__PURE__*/React.createElement("img",{src:carte.url,alt:"Carte : "+s.titre,className:"w-auto max-h-[62vh] rounded-2xl shadow-2xl"}),/*#__PURE__*/React.createElement("div",{className:"mt-4 w-full grid grid-cols-1 gap-2"},peutPartager&&/*#__PURE__*/React.createElement("button",{onClick:partager,className:"w-full px-4 py-3 rounded-xl bg-[#25D366] text-white font-bold inline-flex items-center justify-center gap-2"},/*#__PURE__*/React.createElement(Send,{size:17})," Partager (WhatsApp, Statut, Instagram\u2026)"),/*#__PURE__*/React.createElement("a",{href:carte.url,download:`le-saviez-vous-${s.id}.jpg`,className:"w-full px-4 py-3 rounded-xl bg-white text-slate-900 font-semibold text-center"},"T\xE9l\xE9charger l'image"),/*#__PURE__*/React.createElement("button",{onClick:copier,className:"w-full px-4 py-3 rounded-xl bg-white/10 text-white font-semibold"},"Copier le texte et le lien")),/*#__PURE__*/React.createElement("p",{className:"text-xs text-white/60 mt-3 text-center"},peutPartager?"Si WhatsApp n'ajoute pas le texte sous l'image, touchez « Copier le texte » puis collez-le.":"Téléchargez l'image, puis envoyez-la avec le texte copié."))));}// Partage d'un savoir (v140) : WhatsApp (avec aperçu : titre, texte, image) ou copie du lien.
+function PartageSavoir({s,notify,petit}){const url=lienSavoir(s);const msg=`💡 *Le saviez-vous ?*\n${s.titre}${s.auteur_nom?`\nPrésenté par ${s.auteur_nom}`:""}\n\n${url}`;const copier=async()=>{try{await navigator.clipboard.writeText(url);if(notify)notify("Lien copié : collez-le où vous voulez.");}catch(e){window.prompt("Copiez le lien :",url);}};const cls=petit?"px-3 py-1.5 rounded-lg text-xs":"px-4 py-2.5 rounded-xl text-sm";return/*#__PURE__*/React.createElement("div",{className:"flex flex-wrap gap-2"},/*#__PURE__*/React.createElement(PartageImage,{s:s,notify:notify,petit:petit}),/*#__PURE__*/React.createElement("a",{href:/* api.whatsapp.com garde les émojis, contrairement à wa.me (v141) */"https://api.whatsapp.com/send?text="+encodeURIComponent(msg),target:"_blank",rel:"noopener noreferrer",className:cls+" bg-[#25D366] hover:bg-[#1ebe5b] text-white font-semibold inline-flex items-center gap-2"},/*#__PURE__*/React.createElement(Send,{size:petit?13:15})," Partager sur WhatsApp"),/*#__PURE__*/React.createElement("button",{type:"button",onClick:copier,className:cls+" bg-white border border-slate-300 text-slate-700 font-semibold hover:text-orange-600"},"Copier le lien"));}// Carte de l'accueil : le savoir de la semaine (cachée tant qu'aucun savoir n'est publié).
 function SavoirAccueil({go}){const l=useSavoirs();const s=l&&l[0];if(!s)return null;return/*#__PURE__*/React.createElement("section",{className:"max-w-6xl mx-auto px-4 pt-10"},/*#__PURE__*/React.createElement("button",{onClick:()=>go("savoirs"),className:"group w-full text-left relative overflow-hidden rounded-3xl bg-white shadow-sm hover:shadow-xl transition border border-orange-100 grid md:grid-cols-5"},/*#__PURE__*/React.createElement("div",{className:"absolute -left-10 -top-10 w-40 h-40 rounded-full bg-amber-100 opacity-60"}),/*#__PURE__*/React.createElement("div",{className:"relative p-6 sm:p-8 md:col-span-3 flex flex-col"},/*#__PURE__*/React.createElement("p",{className:"inline-flex items-center gap-2 text-orange-600 font-bold text-sm uppercase tracking-widest"},/*#__PURE__*/React.createElement(Lightbulb,{size:18})," Le saviez-vous ?"),/*#__PURE__*/React.createElement("h2",{className:"text-xl sm:text-2xl font-extrabold text-slate-900 mt-3 leading-snug group-hover:text-orange-700 transition"},s.titre),/*#__PURE__*/React.createElement("p",{className:"text-slate-600 mt-3 line-clamp-3 whitespace-pre-line"},s.texte),/*#__PURE__*/React.createElement("div",{className:"mt-5 flex flex-wrap items-center justify-between gap-4"},/*#__PURE__*/React.createElement(AuteurSavoir,{s:s}),/*#__PURE__*/React.createElement("span",{className:"text-orange-600 font-semibold text-sm inline-flex items-center gap-1 group-hover:gap-2 transition-all"},"Lire la suite ",/*#__PURE__*/React.createElement(ArrowRight,{size:16})))),s.image&&/*#__PURE__*/React.createElement("div",{className:"relative md:col-span-2 h-48 md:h-auto min-h-[12rem] bg-slate-100"},/*#__PURE__*/React.createElement("img",{src:s.image,alt:"",loading:"lazy",className:"absolute inset-0 w-full h-full object-cover"}))));}// Page « Le saviez-vous ? » : tous les savoirs publiés, le plus récent en premier.
 function SavoirsPage({go,notify}){const l=useSavoirs();const[video,setVideo]=useState(null);// Arrivée par un lien partagé (/le-saviez-vous/12-…) : on descend jusqu'au savoir et on le met en valeur (v140).
 const cible=savoirDuChemin();useEffect(()=>{if(!l||!cible)return;// Deux essais : le site remonte d'abord en haut de page en changeant de page.
