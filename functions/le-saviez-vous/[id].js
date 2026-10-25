@@ -1,4 +1,4 @@
-// CGE ARSTM · fonction Cloudflare Pages (v140) : aperçu WhatsApp / Facebook d'un « Le saviez-vous ? ».
+// CGE ARSTM · fonction Cloudflare Pages (v140, v141) : aperçu WhatsApp / Facebook d'un « Le saviez-vous ? ».
 // Adresse servie : https://cge-arstm.com/le-saviez-vous/12-titre-du-savoir
 // WhatsApp ne lit pas le code du site : cette fonction renvoie la page normale (index.html) en remplaçant
 // le titre, la description et l'image d'aperçu par ceux du savoir. Les visiteurs voient le site comme d'habitude.
@@ -30,6 +30,8 @@ export async function onRequestGet(context) {
   const titre = "💡 " + court(s.titre || "Le saviez-vous ?", 110);
   const description = court(s.texte, 170) + (s.auteur_nom ? ` — Présenté par ${s.auteur_nom}, CGE ARSTM` : "");
   const image = s.image || IMAGE_DEFAUT;
+  // Type de l'image (v141) : aide WhatsApp à choisir la grande bannière.
+  const typeImage = /\.png(\?|$)/i.test(image) ? "image/png" : /\.webp(\?|$)/i.test(image) ? "image/webp" : "image/jpeg";
   const url = new URL(request.url); url.search = ""; url.hash = "";
   const remplacer = (valeur) => ({ element(e) { e.setAttribute("content", valeur); } });
 
@@ -41,6 +43,8 @@ export async function onRequestGet(context) {
     .on('meta[property="og:title"]', remplacer(titre))
     .on('meta[property="og:description"]', remplacer(description))
     .on('meta[property="og:image"]', remplacer(image))
+    .on('meta[property="og:image:secure_url"]', remplacer(image))
+    .on('meta[property="og:image:type"]', remplacer(typeImage))
     .on('meta[property="og:image:alt"]', remplacer(court(s.titre, 120)))
     .on('meta[name="twitter:image"]', remplacer(image))
     // Une image envoyée par le membre n'a pas forcément le format 1200 × 630 : on retire ces deux indications.
