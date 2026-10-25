@@ -1,4 +1,4 @@
-# Pages du site CGE ARSTM : servies par index.html (v116).
+# Pages du site CGE ARSTM : servies par index.html (v116, + /le-saviez-vous en v139).
 # Toute autre adresse affiche la page 404.html.
 /apropos                 /  200
 /apropos/                /  200
@@ -16,6 +16,8 @@
 /opportunites/           /  200
 /alumni                  /  200
 /alumni/                 /  200
+/le-saviez-vous          /  200
+/le-saviez-vous/         /  200
 /mediatheque             /  200
 /mediatheque/            /  200
 /partenaires             /  200
